@@ -5,7 +5,8 @@
   "description": "Suftrip V2 modular monolith",
   "scripts": {
     "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "node dist/src/http/server.js"
   },
   "engines": {
     "node": ">=22"
