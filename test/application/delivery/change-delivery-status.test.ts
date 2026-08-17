@@ -16,9 +16,6 @@ describe('ChangeDeliveryStatus', () => {
       nextStatus: 'REQUESTED',
     });
 
-    await expect(repository.getById('job-1')).resolves.toMatchObject({
-      // The repository returns a rehydrated aggregate; snapshot() verifies persistence state.
-    });
     expect((await repository.getById('job-1'))?.snapshot()).toEqual({
       id: 'job-1',
       status: 'REQUESTED',
