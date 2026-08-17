@@ -1,0 +1,17 @@
+{
+  "name": "suftrip-v2",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Suftrip V2 modular monolith",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
