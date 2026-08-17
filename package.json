@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Suftrip V2 modular monolith",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc",
     "test": "vitest run"
   },
   "engines": {
