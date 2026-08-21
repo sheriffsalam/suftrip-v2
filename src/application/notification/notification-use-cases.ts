@@ -1,6 +1,5 @@
 import type { AuthenticatedPrincipal } from '../auth/authentication.js';
-import { AuthorizationError } from '../../shared/errors.js';
-import { NotFoundError, ValidationError } from '../../shared/errors.js';
+import { AuthorizationError, NotFoundError, ValidationError } from '../../shared/errors.js';
 import {
   Notification,
   NotificationAttempt,
@@ -32,20 +31,11 @@ export class CreateNotification {
 
     const existing = await this.notifications.findByCreationIdempotencyKey(idempotencyKey);
     if (existing) {
-      if (existing.snapshot().recipientId !== recipientId) {
-        throw new AuthorizationError();
-      }
+      if (existing.snapshot().recipientId !== recipientId) throw new AuthorizationError();
       return existing.snapshot();
     }
 
-    const notification = Notification.create(
-      notificationId,
-      recipientId,
-      channel,
-      templateKey,
-      payload,
-      idempotencyKey,
-    );
+    const notification = Notification.create(notificationId, recipientId, channel, templateKey, payload, idempotencyKey);
     await this.notifications.saveNew(notification, idempotencyKey);
     return notification.snapshot();
   }
@@ -54,41 +44,23 @@ export class CreateNotification {
 export class GetNotification {
   constructor(private readonly notifications: NotificationRepository) {}
 
-  async execute(
-    principal: AuthenticatedPrincipal,
-    notificationId: string,
-  ): Promise<ReturnType<Notification['snapshot']>> {
-    const notification = await getAuthorizedNotification(principal, notificationId, this.notifications);
-    return notification.snapshot();
+  async execute(principal: AuthenticatedPrincipal, notificationId: string): Promise<ReturnType<Notification['snapshot']>> {
+    return (await getAuthorizedNotification(principal, notificationId, this.notifications)).snapshot();
   }
 }
 
 export class SendNotification {
-  constructor(
-    private readonly notifications: NotificationRepository,
-    private readonly sender: NotificationSender,
-  ) {}
+  constructor(private readonly notifications: NotificationRepository, private readonly sender: NotificationSender) {}
 
-  async execute(
-    principal: AuthenticatedPrincipal,
-    notificationId: string,
-    idempotencyKey: string,
-  ): Promise<NotificationOperationResult> {
+  async execute(principal: AuthenticatedPrincipal, notificationId: string, idempotencyKey: string): Promise<NotificationOperationResult> {
     return deliver(principal, notificationId, idempotencyKey, 'SEND', this.notifications, this.sender);
   }
 }
 
 export class RetryNotification {
-  constructor(
-    private readonly notifications: NotificationRepository,
-    private readonly sender: NotificationSender,
-  ) {}
+  constructor(private readonly notifications: NotificationRepository, private readonly sender: NotificationSender) {}
 
-  async execute(
-    principal: AuthenticatedPrincipal,
-    notificationId: string,
-    idempotencyKey: string,
-  ): Promise<NotificationOperationResult> {
+  async execute(principal: AuthenticatedPrincipal, notificationId: string, idempotencyKey: string): Promise<NotificationOperationResult> {
     return deliver(principal, notificationId, idempotencyKey, 'RETRY', this.notifications, this.sender);
   }
 }
@@ -103,8 +75,9 @@ export class CancelNotification {
   ): Promise<ReturnType<Notification['snapshot']>> {
     requireIdempotencyKey(idempotencyKey);
     const notification = await getAuthorizedNotification(principal, notificationId, this.notifications);
-    const existing = await this.notifications.findAttemptByIdempotencyKey(notificationId, 'CANCEL', idempotencyKey);
-    if (existing) return notification.snapshot();
+    if (await this.notifications.hasOperationIdempotencyKey(notificationId, 'CANCEL', idempotencyKey)) {
+      return notification.snapshot();
+    }
 
     const expectedVersion = notification.snapshot().version;
     notification.cancel();
@@ -135,24 +108,12 @@ async function deliver(
     const result = await sender.send(notification, attemptId);
     notification.markSent(attemptId);
     const completedAttempt = attempt.withStatus('SENT', result.providerReference);
-    await notifications.saveOperation(
-      notification,
-      expectedVersion,
-      completedAttempt,
-      operation,
-      idempotencyKey,
-    );
+    await notifications.saveOperation(notification, expectedVersion, completedAttempt, operation, idempotencyKey);
     return { notification: notification.snapshot(), attempt: completedAttempt.snapshot() };
   } catch (error) {
     notification.markFailed(attemptId);
     const failedAttempt = attempt.withStatus('FAILED');
-    await notifications.saveOperation(
-      notification,
-      expectedVersion,
-      failedAttempt,
-      operation,
-      idempotencyKey,
-    );
+    await notifications.saveOperation(notification, expectedVersion, failedAttempt, operation, idempotencyKey);
     throw error;
   }
 }
