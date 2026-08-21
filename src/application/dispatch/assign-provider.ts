@@ -1,0 +1,61 @@
+import type { AuthenticatedPrincipal } from '../auth/authentication.js';
+import { requireDeliveryAccess } from '../auth/authorization.js';
+import type { DeliveryJobRepository } from '../delivery/delivery-job-repository.js';
+import { DispatchAssignmentConflictError, NotFoundError, ProviderUnavailableError } from '../../shared/errors.js';
+import type { DispatchJob } from '../../domain/dispatch/dispatch-job.js';
+import type { DispatchAssignmentRepository } from './dispatch-repository.js';
+import type { ProviderRepository } from './provider-repository.js';
+import { FindDispatchCandidate } from './find-dispatch-candidate.js';
+
+export class AssignProvider {
+  private readonly findCandidate: FindDispatchCandidate;
+
+  constructor(
+    private readonly deliveries: DeliveryJobRepository,
+    private readonly dispatches: DispatchAssignmentRepository,
+    private readonly providers: ProviderRepository,
+  ) {
+    this.findCandidate = new FindDispatchCandidate(deliveries, dispatches, providers);
+  }
+
+  async execute(
+    principal: AuthenticatedPrincipal,
+    dispatchJobId: string,
+    requestedProviderId?: string,
+  ): Promise<ReturnType<DispatchJob['snapshot']>> {
+    const dispatch = await this.dispatches.getById(dispatchJobId);
+    if (!dispatch) throw new NotFoundError(`DispatchJob not found: ${dispatchJobId}`);
+    const delivery = await this.deliveries.getById(dispatch.snapshot().deliveryJobId);
+    if (!delivery) throw new NotFoundError(`DeliveryJob not found: ${dispatch.snapshot().deliveryJobId}`);
+    requireDeliveryAccess(principal, delivery.snapshot().requesterId);
+
+    if (dispatch.snapshot().status === 'PROVIDER_ASSIGNED' &&
+        dispatch.snapshot().assignedProviderId === requestedProviderId) {
+      return dispatch.snapshot();
+    }
+    if (dispatch.snapshot().status === 'PROVIDER_REJECTED') {
+      const previousVersion = dispatch.snapshot().version;
+      dispatch.startSearching();
+      await this.dispatches.save(dispatch, previousVersion);
+    }
+    if (dispatch.snapshot().status !== 'SEARCHING') {
+      throw new DispatchAssignmentConflictError('DispatchJob is not searching for a provider');
+    }
+
+    const provider = requestedProviderId
+      ? await this.providers.getById(requestedProviderId)
+      : await this.findCandidate.execute(dispatchJobId);
+    if (!provider || provider.snapshot().availability !== 'AVAILABLE') {
+      throw new ProviderUnavailableError();
+    }
+
+    dispatch.assignProvider(provider.snapshot().id);
+    try {
+      await this.dispatches.assignProvider(dispatch, provider.snapshot().id, dispatch.snapshot().version - 1);
+    } catch (error: unknown) {
+      if (error instanceof DispatchAssignmentConflictError) throw error;
+      throw new DispatchAssignmentConflictError();
+    }
+    return dispatch.snapshot();
+  }
+}

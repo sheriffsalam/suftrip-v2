@@ -4,17 +4,56 @@ import {
   InvalidDeliveryTransitionError,
 } from '../../src/domain/delivery/delivery-job.js';
 
+function createJob(id = 'job-1') {
+  return DeliveryJob.create({
+    id,
+    requesterId: 'requester-1',
+    pickup: {
+      address: 'Ikeja, Lagos',
+      latitude: 6.6018,
+      longitude: 3.3515,
+    },
+    dropoff: {
+      address: 'Victoria Island, Lagos',
+      latitude: 6.4281,
+      longitude: 3.4219,
+    },
+    deliveryType: 'PARCEL',
+  });
+}
+
 describe('DeliveryJob', () => {
   it('starts in DRAFT', () => {
-    expect(DeliveryJob.create('job-1').snapshot()).toEqual({
-      id: 'job-1',
-      status: 'DRAFT',
-      version: 0,
+    const snapshot = createJob().snapshot();
+
+    expect(snapshot.id).toBe('job-1');
+    expect(snapshot.requesterId).toBe('requester-1');
+    expect(snapshot.deliveryType).toBe('PARCEL');
+    expect(snapshot.status).toBe('DRAFT');
+    expect(snapshot.version).toBe(0);
+    expect(snapshot.createdAt).toBeTruthy();
+    expect(snapshot.updatedAt).toBeTruthy();
+  });
+
+  it('stores pickup and dropoff locations', () => {
+    const snapshot = createJob().snapshot();
+
+    expect(snapshot.pickup).toEqual({
+      address: 'Ikeja, Lagos',
+      latitude: 6.6018,
+      longitude: 3.3515,
+    });
+
+    expect(snapshot.dropoff).toEqual({
+      address: 'Victoria Island, Lagos',
+      latitude: 6.4281,
+      longitude: 3.4219,
     });
   });
 
   it('allows the documented happy-path lifecycle', () => {
-    const job = DeliveryJob.create('job-1');
+    const job = createJob();
+
     for (const status of [
       'REQUESTED',
       'SEARCHING_FOR_PROVIDER',
@@ -29,20 +68,21 @@ describe('DeliveryJob', () => {
       job.transitionTo(status);
     }
 
-    expect(job.snapshot()).toEqual({
-      id: 'job-1',
-      status: 'DELIVERED',
-      version: 9,
-    });
+    expect(job.snapshot().status).toBe('DELIVERED');
+    expect(job.snapshot().version).toBe(9);
   });
 
   it('rejects invalid lifecycle transitions', () => {
-    const job = DeliveryJob.create('job-1');
-    expect(() => job.transitionTo('DELIVERED')).toThrow(InvalidDeliveryTransitionError);
+    const job = createJob();
+
+    expect(() => job.transitionTo('DELIVERED')).toThrow(
+      InvalidDeliveryTransitionError,
+    );
   });
 
   it('emits a domain event for a successful transition', () => {
-    const job = DeliveryJob.create('job-1');
+    const job = createJob();
+
     job.transitionTo('REQUESTED');
 
     expect(job.pullEvents()).toEqual([
@@ -53,20 +93,21 @@ describe('DeliveryJob', () => {
         to: 'REQUESTED',
       },
     ]);
+
     expect(job.pullEvents()).toEqual([]);
   });
 
   it('supports the explicitly documented cancellation paths', () => {
-    const requested = DeliveryJob.create('job-1');
+    const requested = createJob('job-1');
     requested.transitionTo('REQUESTED');
     requested.transitionTo('CANCELLED');
 
-    const quoting = DeliveryJob.create('job-2');
+    const quoting = createJob('job-2');
     quoting.transitionTo('REQUESTED');
     quoting.transitionTo('QUOTING');
     quoting.transitionTo('CANCELLED');
 
-    const booked = DeliveryJob.create('job-3');
+    const booked = createJob('job-3');
     booked.transitionTo('REQUESTED');
     booked.transitionTo('QUOTING');
     booked.transitionTo('BOOKED');
@@ -75,5 +116,25 @@ describe('DeliveryJob', () => {
     expect(requested.snapshot().status).toBe('CANCELLED');
     expect(quoting.snapshot().status).toBe('CANCELLED');
     expect(booked.snapshot().status).toBe('CANCELLED');
+  });
+
+  it('rejects invalid locations', () => {
+    expect(() =>
+      DeliveryJob.create({
+        id: 'job-invalid',
+        requesterId: 'requester-1',
+        pickup: {
+          address: '',
+          latitude: 6.6018,
+          longitude: 3.3515,
+        },
+        dropoff: {
+          address: 'Victoria Island, Lagos',
+          latitude: 6.4281,
+          longitude: 3.4219,
+        },
+        deliveryType: 'PARCEL',
+      }),
+    ).toThrow('pickup.address is required');
   });
 });

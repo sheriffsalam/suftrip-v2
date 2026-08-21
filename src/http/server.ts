@@ -1,11 +1,42 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { DeliveryService } from '../application/delivery/delivery-service.js';
-import { InMemoryDeliveryJobRepository } from '../application/delivery/in-memory-delivery-job-repository.js';
-import type { DeliveryStatus } from '../domain/delivery/delivery-job.js';
 
-const repository = new InMemoryDeliveryJobRepository();
-const deliveryService = new DeliveryService(repository);
+import {
+  DELIVERY_TYPES,
+  type DeliveryStatus,
+  type DeliveryType,
+} from '../domain/delivery/delivery-job.js';
+
+import { DeliveryService } from '../application/delivery/delivery-service.js';
+import type {
+  AuthenticatedPrincipal,
+  AuthenticationPort,
+} from '../application/auth/authentication.js';
+import { PostgresDeliveryJobRepository } from '../infrastructure/persistence/postgres/postgres-delivery-job-repository.js';
+import { createPostgresPool } from '../infrastructure/persistence/postgres/postgres-client.js';
+import { createAuthenticatorFromEnvironment } from '../infrastructure/auth/signed-bearer-token-authenticator.js';
+import { PostgresDispatchJobRepository } from '../infrastructure/persistence/postgres/postgres-dispatch-repository.js';
+import { PostgresProviderRepository } from '../infrastructure/persistence/postgres/postgres-provider-repository.js';
+import { CreateDispatchJob } from '../application/dispatch/create-dispatch-job.js';
+import { AssignProvider } from '../application/dispatch/assign-provider.js';
+import { DispatchActions } from '../application/dispatch/dispatch-actions.js';
+import { CreateProvider } from '../application/dispatch/create-provider.js';
+import {
+  ApplicationError,
+  AuthenticationError,
+  ValidationError,
+} from '../shared/errors.js';
+
+type DispatchHttpDependencies = Readonly<{
+  createDispatch: CreateDispatchJob;
+  assignProvider: AssignProvider;
+  actions: DispatchActions;
+  createProvider: CreateProvider;
+}>;
 
 const PORT = Number(process.env.PORT ?? 3000);
 
@@ -14,42 +45,72 @@ function sendJson(
   statusCode: number,
   body: unknown,
 ): void {
+  response.setHeader('x-content-type-options', 'nosniff');
+  response.setHeader('referrer-policy', 'no-referrer');
+  response.setHeader('cache-control', 'no-store');
   response.statusCode = statusCode;
-  response.setHeader('content-type', 'application/json; charset=utf-8');
+  response.setHeader(
+    'content-type',
+    'application/json; charset=utf-8',
+  );
   response.end(JSON.stringify(body));
+}
+
+function sendError(
+  response: ServerResponse,
+  statusCode: number,
+  code: string,
+  message: string,
+  requestId: string,
+): void {
+  sendJson(response, statusCode, {
+    error: { code, message, requestId },
+  });
 }
 
 async function readJson(
   request: IncomingMessage,
 ): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let size = 0;
+
+  if (Number(request.headers['content-length'] ?? 0) > 1_048_576) {
+    throw new ValidationError('Request body must not exceed 1 MB');
+  }
 
   for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk));
+    const buffer = Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 1_048_576) {
+      throw new ValidationError('Request body must not exceed 1 MB');
+    }
+    chunks.push(buffer);
   }
 
   if (chunks.length === 0) {
     return {};
   }
 
-  const parsed: unknown = JSON.parse(
-    Buffer.concat(chunks).toString('utf8'),
-  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new ValidationError('Request body must be valid JSON');
+  }
 
   if (
     !parsed ||
     typeof parsed !== 'object' ||
     Array.isArray(parsed)
   ) {
-    throw new Error('Request body must be a JSON object');
+    throw new ValidationError('Request body must be a JSON object');
   }
 
   return parsed as Record<string, unknown>;
 }
 
 function isDeliveryStatus(value: unknown): value is DeliveryStatus {
-  return (
-    typeof value === 'string' &&
+  return typeof value === 'string' &&
     [
       'DRAFT',
       'REQUESTED',
@@ -64,14 +125,103 @@ function isDeliveryStatus(value: unknown): value is DeliveryStatus {
       'ARRIVING',
       'DELIVERED',
       'CANCELLED',
-    ].includes(value)
+    ].includes(value);
+}
+
+function isDeliveryType(value: unknown): value is DeliveryType {
+  return typeof value === 'string' &&
+    DELIVERY_TYPES.includes(value as DeliveryType);
+}
+
+function isLocation(value: unknown): value is {
+  address: string;
+  latitude: number;
+  longitude: number;
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const location = value as Record<string, unknown>;
+
+  return (
+    typeof location.address === 'string' &&
+    Number.isFinite(location.latitude) &&
+    Number.isFinite(location.longitude)
   );
+}
+
+function isProviderLocation(value: unknown): value is {
+  latitude: number;
+  longitude: number;
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const location = value as Record<string, unknown>;
+  return Number.isFinite(location.latitude) && Number.isFinite(location.longitude);
+}
+
+function requestIdFor(request: IncomingMessage): string {
+  const supplied = request.headers['x-request-id'];
+  return typeof supplied === 'string' && supplied.trim()
+    ? supplied.trim().slice(0, 128)
+    : randomUUID();
+}
+
+function authenticateRequest(
+  request: IncomingMessage,
+  authenticator: AuthenticationPort,
+): AuthenticatedPrincipal {
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== 'string') {
+    throw new AuthenticationError();
+  }
+
+  const match = /^Bearer\s+([^\s]+)$/i.exec(authorization);
+  if (!match?.[1]) {
+    throw new AuthenticationError('Authorization must use Bearer authentication');
+  }
+
+  return authenticator.authenticate(match[1]);
+}
+
+function deliveryJobResponse(job: Awaited<ReturnType<DeliveryService['get']>>): unknown {
+  if (!job) return job;
+
+  return {
+    id: job.id,
+    requesterId: job.requesterId,
+    pickup: job.pickup,
+    dropoff: job.dropoff,
+    deliveryType: job.deliveryType,
+    status: job.status,
+    version: job.version,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function dispatchJobResponse(job: Awaited<ReturnType<DispatchActions['get']>>): unknown {
+  return {
+    id: job.id,
+    deliveryJobId: job.deliveryJobId,
+    status: job.status,
+    assignedProviderId: job.assignedProviderId,
+    attempt: job.attempt,
+    version: job.version,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
 }
 
 async function handle(
   request: IncomingMessage,
   response: ServerResponse,
+  service: DeliveryService,
+  requestId: string,
+  authenticator: AuthenticationPort,
+  dispatch: DispatchHttpDependencies | undefined,
 ): Promise<void> {
+  response.setHeader('x-request-id', requestId);
   const method = request.method ?? 'GET';
 
   const url = new URL(
@@ -81,7 +231,6 @@ async function handle(
 
   const parts = url.pathname.split('/').filter(Boolean);
 
-  // Health check
   if (method === 'GET' && url.pathname === '/health') {
     sendJson(response, 200, {
       status: 'ok',
@@ -90,112 +239,217 @@ async function handle(
     return;
   }
 
-  // Create DeliveryJob
+  const isDeliveryApi = parts[0] === 'api' && parts[1] === 'v1';
+  const principal = isDeliveryApi
+    ? authenticateRequest(request, authenticator)
+    : undefined;
+
+  if (dispatch && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs' && parts.length === 5 && parts[4] === 'dispatch' && method === 'POST') {
+    const body = await readJson(request);
+    const dispatchJobId = typeof body.id === 'string' && body.id.trim() ? body.id : randomUUID();
+    const job = await dispatch.createDispatch.execute(principal, dispatchJobId, decodeURIComponent(parts[3] ?? ''));
+    sendJson(response, 201, dispatchJobResponse(job));
+    return;
+  }
+
+  if (dispatch && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'dispatch-jobs' && parts.length === 4 && method === 'GET') {
+    const job = await dispatch.actions.get(principal, decodeURIComponent(parts[3] ?? ''));
+    sendJson(response, 200, dispatchJobResponse(job));
+    return;
+  }
+
+  if (dispatch && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'dispatch-jobs' && parts.length === 5 && method === 'POST') {
+    const dispatchJobId = decodeURIComponent(parts[3] ?? '');
+    const action = parts[4];
+    const body = await readJson(request);
+    if (action === 'assign') {
+      const providerId = typeof body.providerId === 'string' ? body.providerId : undefined;
+      const job = await dispatch.assignProvider.execute(principal, dispatchJobId, providerId);
+      sendJson(response, 200, dispatchJobResponse(job));
+      return;
+    }
+    const providerId = typeof body.providerId === 'string' ? body.providerId : principal.userId;
+    const job = action === 'accept'
+      ? await dispatch.actions.accept(principal, dispatchJobId, providerId)
+      : action === 'reject'
+        ? await dispatch.actions.reject(principal, dispatchJobId, providerId)
+        : action === 'cancel'
+          ? await dispatch.actions.cancel(principal, dispatchJobId)
+          : null;
+    if (job) {
+      sendJson(response, 200, dispatchJobResponse(job));
+      return;
+    }
+  }
+
+  if (dispatch && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'providers' && parts.length === 3 && method === 'POST') {
+    const body = await readJson(request);
+    const availability = body.availability;
+    if (typeof body.id !== 'string' || !body.id.trim() ||
+        !['OFFLINE', 'AVAILABLE', 'BUSY', 'SUSPENDED'].includes(String(availability)) ||
+        !isProviderLocation(body.location)) {
+      throw new ValidationError('Provider id, availability, and location are required');
+    }
+    const provider = await dispatch.createProvider.execute(principal, {
+      id: body.id,
+      availability: availability as 'OFFLINE' | 'AVAILABLE' | 'BUSY' | 'SUSPENDED',
+      location: body.location,
+    });
+    sendJson(response, 201, provider);
+    return;
+  }
+
   if (
     method === 'POST' &&
-    parts.length === 1 &&
-    parts[0] === 'delivery-jobs'
+    parts.length === 3 &&
+    parts[0] === 'api' &&
+    parts[1] === 'v1' &&
+    parts[2] === 'delivery-jobs'
   ) {
     const body = await readJson(request);
+
+    const pickup = body.pickup;
+    const dropoff = body.dropoff;
+
+    const deliveryType = body.deliveryType;
+
+    if (!isLocation(pickup)) {
+      sendError(response, 400, 'VALIDATION_ERROR', 'pickup must contain address, latitude and longitude', requestId);
+      return;
+    }
+
+    if (!isLocation(dropoff)) {
+      sendError(response, 400, 'VALIDATION_ERROR', 'dropoff must contain address, latitude and longitude', requestId);
+      return;
+    }
+
+    if (!isDeliveryType(deliveryType)) {
+      sendError(response, 400, 'VALIDATION_ERROR', `deliveryType must be one of: ${DELIVERY_TYPES.join(', ')}`, requestId);
+      return;
+    }
 
     const id =
       typeof body.id === 'string' && body.id.trim()
         ? body.id
         : randomUUID();
 
-    sendJson(
-      response,
-      201,
-      await deliveryService.create({ id }),
-    );
+    const job = await service.create(principal!, {
+      id,
+      requesterId: principal!.userId,
+      pickup,
+      dropoff,
+      deliveryType,
+    });
 
+    sendJson(response, 201, deliveryJobResponse(job));
     return;
   }
 
-  // DeliveryJob routes
   if (
-    parts.length === 2 &&
-    parts[0] === 'delivery-jobs'
+    (parts.length === 4 || (parts.length === 5 && parts[4] === 'status')) &&
+    parts[0] === 'api' &&
+    parts[1] === 'v1' &&
+    parts[2] === 'delivery-jobs'
   ) {
-    const id = decodeURIComponent(parts[1] ?? '');
+    const id = decodeURIComponent(parts[3] ?? '');
 
-    // Get DeliveryJob
     if (method === 'GET') {
-      const job = await deliveryService.get(id);
+      const job = await service.get(principal!, id);
 
       if (!job) {
-        sendJson(response, 404, {
-          error: `DeliveryJob not found: ${id}`,
-        });
+        sendError(response, 404, 'DELIVERY_JOB_NOT_FOUND', 'Delivery job was not found', requestId);
         return;
       }
 
-      sendJson(response, 200, job);
+      sendJson(response, 200, deliveryJobResponse(job));
       return;
     }
 
-    // Change DeliveryJob status
-    if (method === 'PATCH' && parts[1]) {
+    if (method === 'PATCH' && parts[3]) {
       const body = await readJson(request);
 
       const expectedVersion = body.expectedVersion;
       const nextStatus = body.nextStatus;
 
       if (
-        typeof expectedVersion !== 'number' ||
         !Number.isInteger(expectedVersion) ||
-        expectedVersion < 0 ||
+        (expectedVersion as number) < 0 ||
         !isDeliveryStatus(nextStatus)
       ) {
-        sendJson(response, 400, {
-          error:
-            'expectedVersion must be a non-negative integer and nextStatus must be a valid DeliveryStatus',
-        });
+        sendError(response, 400, 'VALIDATION_ERROR', 'expectedVersion must be a non-negative integer and nextStatus must be a valid DeliveryStatus', requestId);
         return;
       }
 
-      sendJson(
-        response,
-        200,
-        await deliveryService.changeStatus(
-          id,
-          expectedVersion,
-          nextStatus,
-        ),
+      const job = await service.changeStatus(
+        principal!,
+        id,
+        expectedVersion as number,
+        nextStatus,
       );
 
+      sendJson(response, 200, deliveryJobResponse(job));
       return;
     }
   }
 
-  sendJson(response, 404, {
-    error: 'Route not found',
+  sendError(response, 404, 'ROUTE_NOT_FOUND', 'Route not found', requestId);
+}
+
+function errorResponse(
+  response: ServerResponse,
+  error: unknown,
+  requestId: string,
+): void {
+  if (error instanceof ApplicationError) {
+    const statusCode = error.code === 'NOT_FOUND'
+      ? 404
+      : error.code === 'CONFLICT'
+        ? 409
+        : error.code === 'INVALID_TRANSITION'
+          ? 422
+          : error.code === 'AUTHENTICATION_ERROR'
+            ? 401
+            : error.code === 'AUTHORIZATION_ERROR'
+              ? 403
+          : 400;
+    sendError(response, statusCode, error.code, error.message, requestId);
+    return;
+  }
+
+  sendError(response, 500, 'INTERNAL_SERVER_ERROR', 'Internal server error', requestId);
+}
+
+export function createHttpServer(
+  service?: DeliveryService,
+  authenticator?: AuthenticationPort,
+  dispatchDependencies?: DispatchHttpDependencies,
+) {
+  const pool = service || dispatchDependencies ? undefined : createPostgresPool();
+  const deliveryRepository = pool ? new PostgresDeliveryJobRepository(pool) : undefined;
+  const selectedService = service ?? new DeliveryService(deliveryRepository!);
+  const selectedAuthenticator = authenticator ?? createAuthenticatorFromEnvironment();
+  const selectedDispatch = dispatchDependencies ?? (pool ? (() => {
+    const dispatchRepository = new PostgresDispatchJobRepository(pool);
+    const providerRepository = new PostgresProviderRepository(pool);
+    return {
+      createDispatch: new CreateDispatchJob(deliveryRepository!, dispatchRepository),
+      assignProvider: new AssignProvider(deliveryRepository!, dispatchRepository, providerRepository),
+      actions: new DispatchActions(deliveryRepository!, dispatchRepository),
+      createProvider: new CreateProvider(providerRepository),
+    };
+  })() : undefined);
+
+  return createServer((request, response) => {
+    const requestId = requestIdFor(request);
+    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch).catch((error: unknown) => {
+      errorResponse(response, error, requestId);
+    });
   });
 }
 
-const server = createServer(
-  (request: IncomingMessage, response: ServerResponse) => {
-    handle(request, response).catch((error: unknown) => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Internal server error';
-
-      const statusCode = message.includes('not found')
-        ? 404
-        : message.includes('conflict')
-          ? 409
-          : 400;
-
-      sendJson(response, statusCode, {
-        error: message,
-      });
-    });
-  },
-);
-
-server.listen(PORT, () => {
-  console.log(
-    `Suftrip API listening on http://localhost:${PORT}`,
-  );
-});
+if (process.argv[1]?.endsWith('server.js')) {
+  const server = createHttpServer();
+  server.listen(PORT, () => {
+    console.log(`Suftrip API listening on http://localhost:${PORT}`);
+  });
+}

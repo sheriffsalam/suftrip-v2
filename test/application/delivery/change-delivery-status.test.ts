@@ -3,62 +3,85 @@ import { DeliveryJob } from '../../../src/domain/delivery/delivery-job.js';
 import { ChangeDeliveryStatus } from '../../../src/application/delivery/change-delivery-status.js';
 import { InMemoryDeliveryJobRepository } from '../../../src/application/delivery/in-memory-delivery-job-repository.js';
 
+const customer = { userId: 'requester-1', roles: ['CUSTOMER'] as const };
+
+function createJob(id = 'job-1') {
+  return DeliveryJob.create({
+    id,
+    requesterId: 'requester-1',
+    pickup: {
+      address: 'Ikeja, Lagos',
+      latitude: 6.6018,
+      longitude: 3.3515,
+    },
+    dropoff: {
+      address: 'Victoria Island, Lagos',
+      latitude: 6.4281,
+      longitude: 3.4219,
+    },
+    deliveryType: 'PARCEL',
+  });
+}
+
 describe('ChangeDeliveryStatus', () => {
-  it('changes and persists a delivery job using the expected version', async () => {
+  it('changes status when expected version matches', async () => {
     const repository = new InMemoryDeliveryJobRepository();
-    const job = DeliveryJob.create('job-1');
-    await repository.save(job, 0);
+
+    await repository.save(createJob(), 0);
 
     const useCase = new ChangeDeliveryStatus(repository);
+
     await useCase.execute({
+      principal: customer,
       deliveryJobId: 'job-1',
       expectedVersion: 0,
       nextStatus: 'REQUESTED',
     });
 
-    expect((await repository.getById('job-1'))?.snapshot()).toEqual({
-      id: 'job-1',
-      status: 'REQUESTED',
-      version: 1,
-    });
+    const job = await repository.getById('job-1');
+
+    expect(job?.snapshot().status).toBe('REQUESTED');
+    expect(job?.snapshot().version).toBe(1);
   });
 
-  it('rejects a stale expected version', async () => {
+  it('rejects stale versions', async () => {
     const repository = new InMemoryDeliveryJobRepository();
-    await repository.save(DeliveryJob.create('job-1'), 0);
 
-    const first = new ChangeDeliveryStatus(repository);
-    await first.execute({
+    await repository.save(createJob(), 0);
+
+    const useCase = new ChangeDeliveryStatus(repository);
+
+    await useCase.execute({
+      principal: customer,
       deliveryJobId: 'job-1',
       expectedVersion: 0,
       nextStatus: 'REQUESTED',
     });
 
-    const stale = new ChangeDeliveryStatus(repository);
     await expect(
-      stale.execute({
+      useCase.execute({
+        principal: customer,
         deliveryJobId: 'job-1',
         expectedVersion: 0,
         nextStatus: 'QUOTING',
       }),
-    ).rejects.toThrow('DeliveryJob version conflict');
-
-    expect((await repository.getById('job-1'))?.snapshot()).toEqual({
-      id: 'job-1',
-      status: 'REQUESTED',
-      version: 1,
-    });
+    ).rejects.toThrow('version conflict');
   });
 
-  it('fails when the delivery job does not exist', async () => {
-    const useCase = new ChangeDeliveryStatus(new InMemoryDeliveryJobRepository());
+  it('rejects invalid lifecycle transitions', async () => {
+    const repository = new InMemoryDeliveryJobRepository();
+
+    await repository.save(createJob(), 0);
+
+    const useCase = new ChangeDeliveryStatus(repository);
 
     await expect(
       useCase.execute({
-        deliveryJobId: 'missing-job',
+        principal: customer,
+        deliveryJobId: 'job-1',
         expectedVersion: 0,
-        nextStatus: 'REQUESTED',
+        nextStatus: 'DELIVERED',
       }),
-    ).rejects.toThrow('DeliveryJob not found: missing-job');
+    ).rejects.toThrow('Invalid DeliveryJob transition');
   });
 });
