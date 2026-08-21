@@ -57,7 +57,7 @@ export class InMemoryNotificationRepository implements NotificationRepository {
   async saveOperation(
     notification: Notification,
     expectedVersion: number,
-    attempt: NotificationAttempt,
+    attempt: NotificationAttempt | null,
     operation: NotificationOperation,
     idempotencyKey: string,
   ): Promise<void> {
@@ -70,13 +70,13 @@ export class InMemoryNotificationRepository implements NotificationRepository {
     if (this.operationKeys.has(operationKey)) {
       throw new IdempotencyConflictError();
     }
-    if (this.attempts.has(attempt.snapshot().id)) {
+    if (attempt && this.attempts.has(attempt.snapshot().id)) {
       throw new ConflictError('Notification attempt already exists');
     }
 
     this.notifications.set(notification.snapshot().id, notification.snapshot());
-    this.attempts.set(attempt.snapshot().id, attempt.snapshot());
-    this.operationKeys.set(operationKey, attempt.snapshot().id);
+    if (attempt) this.attempts.set(attempt.snapshot().id, attempt.snapshot());
+    this.operationKeys.set(operationKey, attempt?.snapshot().id ?? notification.snapshot().id);
   }
 
   private operationKey(
