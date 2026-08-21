@@ -1,7 +1,6 @@
 import {
   ConflictError,
   IdempotencyConflictError,
-  PaymentConcurrencyConflictError,
 } from '../../shared/errors.js';
 import {
   Notification,
@@ -64,7 +63,7 @@ export class InMemoryNotificationRepository implements NotificationRepository {
   ): Promise<void> {
     const current = this.notifications.get(notification.snapshot().id);
     if (!current || current.version !== expectedVersion) {
-      throw new PaymentConcurrencyConflictError('Notification concurrency conflict');
+      throw new ConflictError('Notification concurrency conflict');
     }
 
     const operationKey = this.operationKey(notification.snapshot().id, operation, idempotencyKey);
