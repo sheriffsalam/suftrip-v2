@@ -38,6 +38,14 @@ export class InMemoryNotificationRepository implements NotificationRepository {
     return record ? NotificationAttempt.rehydrate(record) : null;
   }
 
+  async hasOperationIdempotencyKey(
+    notificationId: string,
+    operation: NotificationOperation,
+    idempotencyKey: string,
+  ): Promise<boolean> {
+    return this.operationKeys.has(this.operationKey(notificationId, operation, idempotencyKey));
+  }
+
   async getAttemptById(id: string): Promise<NotificationAttempt | null> {
     const record = this.attempts.get(id);
     return record ? NotificationAttempt.rehydrate(record) : null;
