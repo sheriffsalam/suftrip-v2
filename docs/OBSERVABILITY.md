@@ -10,6 +10,8 @@ Authentication and authorization failures also retain the request ID in their re
 
 Dispatch assignment failures are returned as typed conflicts and retain the request ID. Provider assignment metrics are deferred with the broader metrics platform.
 
+Payment operation failures retain request IDs. Payment amounts, idempotency keys, authorization headers, and any future provider credentials must not be logged.
+
 ## Proposed
 
 Structured logging, database/request latency metrics, delivery creation and transition counters, transition-failure metrics, and tracing are not implemented yet. The request ID is the current application boundary reserved for future logging and tracing adapters.

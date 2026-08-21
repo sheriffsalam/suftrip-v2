@@ -42,6 +42,9 @@ integration('PostgreSQL dispatch persistence', () => {
   });
 
   beforeEach(async () => {
+    await pool.query('DELETE FROM payment_attempts');
+    await pool.query('DELETE FROM payment_creation_keys');
+    await pool.query('DELETE FROM payments');
     await pool.query('DELETE FROM dispatch_jobs');
     await pool.query('DELETE FROM providers');
     await pool.query('DELETE FROM delivery_jobs');

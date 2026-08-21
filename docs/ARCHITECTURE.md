@@ -26,3 +26,7 @@ HTTP extracts a bearer credential and delegates validation to `AuthenticationPor
 ## Dispatch boundary
 
 Dispatch is a separate bounded capability under the modular monolith. `DispatchJob` references `DeliveryJob` by ID and owns provider assignment state. Application use cases select eligible providers through ports. PostgreSQL assignment transactions conditionally change an available provider to `BUSY` and update the dispatch version together; failed claims roll back.
+
+## Payments boundary
+
+Payments is a separate bounded capability. `Payment` references `DeliveryJob` by ID and owns a financial obligation without changing delivery or dispatch aggregates. Amounts are positive safe integer minor units with an explicit three-letter currency. `PaymentRepository` performs atomic payment/attempt writes, version checks, and database-backed idempotency. The current gateway is an internal deterministic test adapter; no external financial transaction is represented.

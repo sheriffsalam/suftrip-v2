@@ -15,6 +15,12 @@ The current HTTP API exposes:
 - `POST /api/v1/dispatch-jobs/:dispatchJobId/reject`
 - `POST /api/v1/dispatch-jobs/:dispatchJobId/cancel`
 - `POST /api/v1/providers` (administrator only, test/provisioning foundation)
+- `POST /api/v1/delivery-jobs/:deliveryJobId/payments`
+- `GET /api/v1/payments/:paymentId`
+- `POST /api/v1/payments/:paymentId/initiate`
+- `POST /api/v1/payments/:paymentId/confirm`
+- `POST /api/v1/payments/:paymentId/fail`
+- `POST /api/v1/payments/:paymentId/cancel`
 
 All `/api/v1/delivery-jobs` endpoints require `Authorization: Bearer <token>`. `/health` remains public.
 
@@ -37,6 +43,8 @@ The optional `id` is generated when omitted. The authenticated principal supplie
 Customers can access their own delivery jobs. Administrators can access delivery jobs across users.
 
 Customers can create and view dispatch jobs for their own deliveries and request assignment. Assigned providers can accept or reject their own assignments. Administrators can provision providers and perform dispatch operations.
+
+Payment mutation endpoints require an `Idempotency-Key` header. Creation keys are unique for a payment obligation; operation keys are scoped to payment and operation. Repeating a request with the same valid key returns the original result. Payment creation, initiation, confirmation, failure, and cancellation require delivery ownership or administrator access.
 
 ## Change status
 
@@ -67,4 +75,4 @@ Current mappings are authentication `401`, authorization `403`, validation `400`
 
 ## Proposed
 
-Idempotency keys, pagination, and OpenAPI publication are not implemented yet. Authentication and ownership authorization are implemented in Phase 5. Idempotency remains reserved for future mutating commands before financial operations are introduced.
+Pagination and OpenAPI publication are not implemented yet. Real gateway callbacks, external payment processing, and financial settlement are deferred.

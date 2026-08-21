@@ -6,7 +6,11 @@ export type ApplicationErrorCode =
   | 'AUTHENTICATION_ERROR'
   | 'AUTHORIZATION_ERROR'
   | 'PROVIDER_UNAVAILABLE'
-  | 'DISPATCH_ASSIGNMENT_CONFLICT';
+  | 'DISPATCH_ASSIGNMENT_CONFLICT'
+  | 'PAYMENT_ALREADY_EXISTS'
+  | 'PAYMENT_CONCURRENCY_CONFLICT'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'PAYMENT_OPERATION_CONFLICT';
 
 export class ApplicationError extends Error {
   constructor(
@@ -71,5 +75,33 @@ export class DispatchAssignmentConflictError extends ApplicationError {
   constructor(message = 'Dispatch provider assignment conflict') {
     super('DISPATCH_ASSIGNMENT_CONFLICT', message);
     this.name = 'DispatchAssignmentConflictError';
+  }
+}
+
+export class PaymentAlreadyExistsError extends ApplicationError {
+  constructor(message = 'Payment already exists') {
+    super('PAYMENT_ALREADY_EXISTS', message);
+    this.name = 'PaymentAlreadyExistsError';
+  }
+}
+
+export class PaymentConcurrencyConflictError extends ApplicationError {
+  constructor(message = 'Payment concurrency conflict') {
+    super('PAYMENT_CONCURRENCY_CONFLICT', message);
+    this.name = 'PaymentConcurrencyConflictError';
+  }
+}
+
+export class IdempotencyConflictError extends ApplicationError {
+  constructor(message = 'Idempotency key has already been used') {
+    super('IDEMPOTENCY_CONFLICT', message);
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+export class PaymentOperationConflictError extends ApplicationError {
+  constructor(message = 'Payment operation conflict') {
+    super('PAYMENT_OPERATION_CONFLICT', message);
+    this.name = 'PaymentOperationConflictError';
   }
 }

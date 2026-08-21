@@ -19,5 +19,6 @@
 - Authentication failures return `401`; authorization failures return `403`.
 - API responses include `nosniff`, `no-referrer`, and `no-store` headers.
 - Dispatch creation and inspection use delivery ownership authorization. Provider acceptance/rejection requires the assigned provider principal or an administrator.
+- Payment operations use delivery ownership authorization and require database-backed idempotency keys. Payment credentials and external gateway callbacks are not accepted or stored.
 
 Rate limiting, audit logging, identity provisioning, token rotation, and external identity-provider integration remain future work. The current API is not production-ready without those controls.

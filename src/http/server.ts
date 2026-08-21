@@ -26,16 +26,36 @@ import { AssignProvider } from '../application/dispatch/assign-provider.js';
 import { DispatchActions } from '../application/dispatch/dispatch-actions.js';
 import { CreateProvider } from '../application/dispatch/create-provider.js';
 import {
+  CancelPayment,
+  ConfirmPayment,
+  CreatePayment,
+  FailPayment,
+  GetPayment,
+  InitiatePayment,
+} from '../application/payment/payment-use-cases.js';
+import type { PaymentOperationResult } from '../application/payment/payment-use-cases.js';
+import { PostgresPaymentRepository } from '../infrastructure/persistence/postgres/postgres-payment-repository.js';
+import { DeterministicPaymentGateway } from '../infrastructure/payments/deterministic-payment-gateway.js';
+import {
   ApplicationError,
   AuthenticationError,
   ValidationError,
 } from '../shared/errors.js';
 
-type DispatchHttpDependencies = Readonly<{
+export type DispatchHttpDependencies = Readonly<{
   createDispatch: CreateDispatchJob;
   assignProvider: AssignProvider;
   actions: DispatchActions;
   createProvider: CreateProvider;
+}>;
+
+export type PaymentHttpDependencies = Readonly<{
+  create: CreatePayment;
+  get: GetPayment;
+  initiate: InitiatePayment;
+  confirm: ConfirmPayment;
+  fail: FailPayment;
+  cancel: CancelPayment;
 }>;
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -213,6 +233,26 @@ function dispatchJobResponse(job: Awaited<ReturnType<DispatchActions['get']>>): 
   };
 }
 
+function paymentResponse(payment: Awaited<ReturnType<GetPayment['execute']>>): unknown {
+  return {
+    id: payment.id,
+    deliveryJobId: payment.deliveryJobId,
+    amountMinor: payment.amountMinor,
+    currency: payment.currency,
+    status: payment.status,
+    version: payment.version,
+    createdAt: payment.createdAt,
+    updatedAt: payment.updatedAt,
+  };
+}
+
+function paymentOperationResponse(result: PaymentOperationResult): unknown {
+  return {
+    payment: paymentResponse(result.payment),
+    attempt: result.attempt,
+  };
+}
+
 async function handle(
   request: IncomingMessage,
   response: ServerResponse,
@@ -220,6 +260,7 @@ async function handle(
   requestId: string,
   authenticator: AuthenticationPort,
   dispatch: DispatchHttpDependencies | undefined,
+  payments: PaymentHttpDependencies | undefined,
 ): Promise<void> {
   response.setHeader('x-request-id', requestId);
   const method = request.method ?? 'GET';
@@ -243,6 +284,59 @@ async function handle(
   const principal = isDeliveryApi
     ? authenticateRequest(request, authenticator)
     : undefined;
+
+  if (payments && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs' && parts.length === 5 && parts[4] === 'payments' && method === 'POST') {
+    const body = await readJson(request);
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() ||
+        typeof body.amountMinor !== 'number' || typeof body.currency !== 'string') {
+      throw new ValidationError('Idempotency-Key, amountMinor, and currency are required');
+    }
+    const paymentId = typeof body.id === 'string' && body.id.trim() ? body.id : randomUUID();
+    const payment = await payments.create.execute(
+      principal,
+      paymentId,
+      decodeURIComponent(parts[3] ?? ''),
+      body.amountMinor,
+      body.currency,
+      idempotencyKey,
+    );
+    sendJson(response, 201, paymentResponse(payment));
+    return;
+  }
+
+  if (payments && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'payments' && parts.length === 4 && method === 'GET') {
+    const payment = await payments.get.execute(principal, decodeURIComponent(parts[3] ?? ''));
+    sendJson(response, 200, paymentResponse(payment));
+    return;
+  }
+
+  if (payments && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'payments' && parts.length === 5 && ['initiate', 'confirm', 'fail', 'cancel'].includes(parts[4] ?? '') && method === 'POST') {
+    const paymentId = decodeURIComponent(parts[3] ?? '');
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+      throw new ValidationError('Idempotency-Key is required');
+    }
+    const body = await readJson(request);
+    const attemptId = typeof body.attemptId === 'string' ? body.attemptId : undefined;
+    const action = parts[4];
+    if (action === 'initiate') {
+      sendJson(response, 200, paymentOperationResponse(await payments.initiate.execute(principal, paymentId, idempotencyKey)));
+      return;
+    }
+    if (action === 'confirm') {
+      sendJson(response, 200, paymentOperationResponse(await payments.confirm.execute(principal, paymentId, idempotencyKey, attemptId)));
+      return;
+    }
+    if (action === 'fail') {
+      sendJson(response, 200, paymentOperationResponse(await payments.fail.execute(principal, paymentId, idempotencyKey, attemptId)));
+      return;
+    }
+    if (action === 'cancel') {
+      sendJson(response, 200, paymentOperationResponse(await payments.cancel.execute(principal, paymentId, idempotencyKey)));
+      return;
+    }
+  }
 
   if (dispatch && principal && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs' && parts.length === 5 && parts[4] === 'dispatch' && method === 'POST') {
     const body = await readJson(request);
@@ -423,8 +517,9 @@ export function createHttpServer(
   service?: DeliveryService,
   authenticator?: AuthenticationPort,
   dispatchDependencies?: DispatchHttpDependencies,
+  paymentDependencies?: PaymentHttpDependencies,
 ) {
-  const pool = service || dispatchDependencies ? undefined : createPostgresPool();
+  const pool = service || dispatchDependencies || paymentDependencies ? undefined : createPostgresPool();
   const deliveryRepository = pool ? new PostgresDeliveryJobRepository(pool) : undefined;
   const selectedService = service ?? new DeliveryService(deliveryRepository!);
   const selectedAuthenticator = authenticator ?? createAuthenticatorFromEnvironment();
@@ -438,10 +533,22 @@ export function createHttpServer(
       createProvider: new CreateProvider(providerRepository),
     };
   })() : undefined);
+  const selectedPayments = paymentDependencies ?? (pool ? (() => {
+    const paymentRepository = new PostgresPaymentRepository(pool);
+    const gateway = new DeterministicPaymentGateway();
+    return {
+      create: new CreatePayment(deliveryRepository!, paymentRepository),
+      get: new GetPayment(deliveryRepository!, paymentRepository),
+      initiate: new InitiatePayment(deliveryRepository!, paymentRepository, gateway),
+      confirm: new ConfirmPayment(deliveryRepository!, paymentRepository),
+      fail: new FailPayment(deliveryRepository!, paymentRepository),
+      cancel: new CancelPayment(deliveryRepository!, paymentRepository),
+    };
+  })() : undefined);
 
   return createServer((request, response) => {
     const requestId = requestIdFor(request);
-    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch).catch((error: unknown) => {
+    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments).catch((error: unknown) => {
       errorResponse(response, error, requestId);
     });
   });
