@@ -14,6 +14,11 @@ export interface NotificationRepository {
     operation: NotificationOperation,
     idempotencyKey: string,
   ): Promise<NotificationAttempt | null>;
+  hasOperationIdempotencyKey(
+    notificationId: string,
+    operation: NotificationOperation,
+    idempotencyKey: string,
+  ): Promise<boolean>;
   getAttemptById(id: string): Promise<NotificationAttempt | null>;
   saveNew(notification: Notification, idempotencyKey: string): Promise<void>;
   saveOperation(
