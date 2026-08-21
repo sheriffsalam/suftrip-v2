@@ -1,6 +1,7 @@
 import type { AuthenticatedPrincipal } from '../auth/authentication.js';
-import { AuthorizationError, NotFoundError, ValidationError } from '../../shared/errors.js';
+import { AuthorizationError, ConflictError, NotFoundError, ValidationError } from '../../shared/errors.js';
 import {
+  InvalidNotificationTransitionError,
   Notification,
   NotificationAttempt,
   type NotificationChannel,
@@ -101,7 +102,16 @@ async function deliver(
 
   const expectedVersion = notification.snapshot().version;
   const attemptId = `${notificationId}-${operation.toLowerCase()}-${expectedVersion + 1}`;
-  notification.beginProcessing(attemptId);
+
+  try {
+    notification.beginProcessing(attemptId);
+  } catch (error) {
+    if (error instanceof InvalidNotificationTransitionError) {
+      throw new ConflictError('Notification cannot be delivered in its current state');
+    }
+    throw error;
+  }
+
   const attempt = NotificationAttempt.create(attemptId, notificationId);
 
   try {
