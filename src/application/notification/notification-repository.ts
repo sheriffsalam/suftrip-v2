@@ -19,7 +19,7 @@ export interface NotificationRepository {
   saveOperation(
     notification: Notification,
     expectedVersion: number,
-    attempt: NotificationAttempt,
+    attempt: NotificationAttempt | null,
     operation: NotificationOperation,
     idempotencyKey: string,
   ): Promise<void>;
