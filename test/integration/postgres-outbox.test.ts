@@ -71,6 +71,17 @@ integration('PostgreSQL durable outbox', () => {
     job.transitionTo('REQUESTED');
     const events = job.pullEvents();
 
+    // Simulate a concurrent writer advancing the persisted aggregate version
+    // after this instance was loaded. The repository must reject the stale
+    // expectedVersion and roll back the outbox insert in the same transaction.
+    await pool.query(
+      `UPDATE delivery_jobs
+          SET version = version + 1,
+              updated_at = NOW()
+        WHERE id = $1`,
+      ['atomic-conflict'],
+    );
+
     await expect(deliveries.save(job, 0, events)).rejects.toThrow(/version conflict/i);
     expect(await outbox.getById('delivery-status:atomic-conflict:DRAFT:REQUESTED')).toBeNull();
     expect((await deliveries.getById('atomic-conflict'))?.snapshot().status).toBe('DRAFT');
