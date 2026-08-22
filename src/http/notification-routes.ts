@@ -38,6 +38,7 @@ export async function handleNotificationRoute(
     return 'not-handled';
   }
 
+  response.setHeader('x-request-id', requestId);
   const principal = authenticate(request, authenticator);
   const method = request.method ?? 'GET';
 
@@ -73,25 +74,29 @@ export async function handleNotificationRoute(
     return 'handled';
   }
 
-  if (parts.length !== 4) return 'not-handled';
-
-  const notificationId = decodeURIComponent(parts[3] ?? '');
-
-  if (method === 'GET') {
+  if (parts.length === 4 && method === 'GET') {
+    const notificationId = decodeURIComponent(parts[3] ?? '');
     sendJson(response, 200, await dependencies.get.execute(principal, notificationId));
     return 'handled';
   }
 
-  if (method !== 'POST') return 'not-handled';
+  if (parts.length === 5 && method === 'POST') {
+    const notificationId = decodeURIComponent(parts[3] ?? '');
+    const action = parts[4];
+    const idempotencyKey = requiredHeader(request, 'idempotency-key');
 
-  const action = parts[3] === 'send' || parts[3] === 'retry' || parts[3] === 'cancel'
-    ? null
-    : undefined;
-
-  if (action === undefined) {
-    const operation = parts[3];
-    const id = decodeURIComponent(parts[3] ?? '');
-    if (!id) return 'not-handled';
+    if (action === 'send') {
+      sendJson(response, 200, await dependencies.send.execute(principal, notificationId, idempotencyKey));
+      return 'handled';
+    }
+    if (action === 'retry') {
+      sendJson(response, 200, await dependencies.retry.execute(principal, notificationId, idempotencyKey));
+      return 'handled';
+    }
+    if (action === 'cancel') {
+      sendJson(response, 200, await dependencies.cancel.execute(principal, notificationId, idempotencyKey));
+      return 'handled';
+    }
   }
 
   return 'not-handled';
@@ -156,7 +161,6 @@ function isPayload(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.setHeader('x-request-id', response.getHeader('x-request-id') ?? '');
   response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('referrer-policy', 'no-referrer');
   response.setHeader('cache-control', 'no-store');
@@ -180,6 +184,9 @@ export function notificationErrorResponse(
             : error instanceof ApplicationError ? 400 : 500;
 
   response.setHeader('x-request-id', requestId);
+  response.setHeader('x-content-type-options', 'nosniff');
+  response.setHeader('referrer-policy', 'no-referrer');
+  response.setHeader('cache-control', 'no-store');
   response.statusCode = status;
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.end(JSON.stringify({ error: { code, message, requestId } }));
