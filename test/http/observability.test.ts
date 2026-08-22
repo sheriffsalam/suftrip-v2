@@ -14,6 +14,11 @@ class TestLogger implements Logger {
   readonly entries: Entry[] = [];
 
   log(level: LogLevel, message: string, context?: Entry['context']): void {
+    if (context === undefined) {
+      this.entries.push({ level, message });
+      return;
+    }
+
     this.entries.push({ level, message, context });
   }
 
