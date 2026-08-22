@@ -8,7 +8,8 @@
     "build": "tsc",
     "test": "vitest run",
     "start": "node dist/src/http/server.js",
-    "db:migrate": "npm run build && node dist/src/infrastructure/persistence/postgres/migrate.js"
+    "db:migrate": "npm run build && node dist/src/infrastructure/persistence/postgres/migrate.js",
+    "outbox:worker": "npm run build && node dist/src/infrastructure/outbox/run-outbox-worker.js"
   },
   "engines": {
     "node": ">=22"

@@ -1,6 +1,7 @@
 import {
   DeliveryJob,
   type CreateDeliveryJobInput,
+  type DeliveryEvent,
   type DeliveryStatus,
 } from '../../domain/delivery/delivery-job.js';
 import type { DeliveryJobRepository } from './delivery-job-repository.js';
@@ -56,7 +57,7 @@ export class DeliveryService {
     requireDeliveryAccess(principal, job.snapshot().requesterId);
     job.transitionTo(nextStatus);
     const events = job.pullEvents();
-    await this.repository.save(job, expectedVersion);
+    await this.repository.save(job, expectedVersion, events);
 
     if (this.eventSink && events.length > 0) {
       await this.eventSink.publish(events);

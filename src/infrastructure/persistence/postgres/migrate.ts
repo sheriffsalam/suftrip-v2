@@ -9,35 +9,22 @@ const migrationPaths = [
   ['002-create-dispatch', 'src/infrastructure/persistence/postgres/migrations/002-create-dispatch.sql'],
   ['003-create-payments', 'src/infrastructure/persistence/postgres/migrations/003-create-payments.sql'],
   ['004-create-notifications', 'src/infrastructure/persistence/postgres/migrations/004-create-notifications.sql'],
+  ['005-create-outbox-events', 'src/infrastructure/persistence/postgres/migrations/005-create-outbox-events.sql'],
 ] as const;
 
 export async function migrate(pool: Pool): Promise<void> {
   const client = await pool.connect();
-
   try {
     await client.query('BEGIN');
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at TIMESTAMPTZ NOT NULL
-      )
-    `);
-
+    await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)`);
     for (const [version, relativePath] of migrationPaths) {
-      const result = await client.query(
-        'SELECT 1 FROM schema_migrations WHERE version = $1',
-        [version],
-      );
+      const result = await client.query('SELECT 1 FROM schema_migrations WHERE version = $1', [version]);
       if (result.rowCount === 0) {
         const migration = await readFile(resolve(process.cwd(), relativePath), 'utf8');
         await client.query(migration);
-        await client.query(
-          'INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)',
-          [version, new Date().toISOString()],
-        );
+        await client.query('INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)', [version, new Date().toISOString()]);
       }
     }
-
     await client.query('COMMIT');
   } catch (error: unknown) {
     await client.query('ROLLBACK');
