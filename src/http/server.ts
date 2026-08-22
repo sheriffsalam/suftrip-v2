@@ -170,11 +170,15 @@ async function handle(request: IncomingMessage, response: ServerResponse, servic
     const job = await service.create(principal!, { id: typeof body.id === 'string' && body.id.trim() ? body.id : randomUUID(), requesterId: principal!.userId, pickup, dropoff, deliveryType: body.deliveryType });
     sendJson(response, 201, deliveryJobResponse(job)); return;
   }
-  if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs') { sendJson(response, 200, deliveryJobResponse(await service.get(principal!, decodeURIComponent(parts[3] ?? '')))); return; }
-  if (method === 'PATCH' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs') {
+  if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs') {
+    const job = await service.get(principal!, decodeURIComponent(parts[3] ?? ''));
+    if (!job) { sendError(response, 404, 'DELIVERY_JOB_NOT_FOUND', 'Delivery job was not found', requestId); return; }
+    sendJson(response, 200, deliveryJobResponse(job)); return;
+  }
+  if (method === 'PATCH' && parts.length === 5 && parts[4] === 'status' && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'delivery-jobs') {
     const body = await readJson(request); const expectedVersion = body.expectedVersion; const nextStatus = body.nextStatus;
     if (!Number.isInteger(expectedVersion) || !isDeliveryStatus(nextStatus)) throw new ValidationError('expectedVersion and nextStatus are required');
-    sendJson(response, 200, deliveryJobResponse(await service.changeStatus(principal!, decodeURIComponent(parts[3] ?? ''), expectedVersion, nextStatus))); return;
+    sendJson(response, 200, deliveryJobResponse(await service.changeStatus(principal!, decodeURIComponent(parts[3] ?? ''), expectedVersion as number, nextStatus))); return;
   }
   sendError(response, 404, 'ROUTE_NOT_FOUND', 'Route not found', requestId);
 }
