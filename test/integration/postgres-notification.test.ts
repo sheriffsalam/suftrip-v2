@@ -3,7 +3,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AuthenticatedPrincipal } from '../../src/application/auth/authentication.js';
 import { CreateNotification, RetryNotification, SendNotification } from '../../src/application/notification/notification-use-cases.js';
-import { InMemoryNotificationRepository } from '../../src/application/notification/in-memory-notification-repository.js';
 import type { Notification } from '../../src/domain/notification/notification.js';
 import type { NotificationSender } from '../../src/application/notification/notification-sender.js';
 import { PostgresNotificationRepository } from '../../src/infrastructure/persistence/postgres/postgres-notification-repository.js';
