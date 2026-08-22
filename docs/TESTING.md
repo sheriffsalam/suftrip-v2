@@ -14,6 +14,8 @@ Current coverage includes:
 - Authentication failures, token expiry, role authorization, ownership authorization, admin access, security headers, and requester identity spoofing.
 - Dispatch lifecycle, deterministic provider selection, provider release/redispatch, authenticated HTTP dispatch flow, PostgreSQL dispatch persistence, and concurrent provider assignment.
 - Payment money/lifecycle validation, ownership, attempts, idempotency, authenticated API flow, PostgreSQL persistence, rollback, and concurrent terminal transitions.
+- Durable outbox claiming, lease expiry/reclamation, publication state, retry state, dead-lettering, publication failure handling, and cross-worker claim concurrency.
+- Outbox worker lifecycle serialization, configurable polling, start/stop behavior, invalid configuration rejection, and isolation of polling failures.
 
 ## Test boundaries
 
@@ -23,7 +25,7 @@ Domain tests are isolated from HTTP. Application tests use the in-memory reposit
 
 Start PostgreSQL and apply migrations with `docker compose up -d postgres` followed by `npm run db:migrate`. Set `DATABASE_URL` from `.env.example`, then run `npx vitest run test/integration/postgres-delivery-job-repository.test.ts`.
 
-Payment integration coverage is in `test/integration/postgres-payment.test.ts` and `test/integration/postgres-payment-http.test.ts`; run either explicitly or use `npm test` with `DATABASE_URL` configured.
+Payment integration coverage is in `test/integration/postgres-payment.test.ts` and `test/integration/postgres-payment-http.test.ts`; outbox coverage is in `test/integration/postgres-outbox.test.ts`. Run individual suites explicitly or use `npm test` with `DATABASE_URL` configured.
 
 The integration suite is skipped when `DATABASE_URL` is absent so unit and API tests do not depend on a developer's database.
 
