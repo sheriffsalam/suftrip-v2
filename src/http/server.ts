@@ -37,6 +37,19 @@ import type { PaymentOperationResult } from '../application/payment/payment-use-
 import { PostgresPaymentRepository } from '../infrastructure/persistence/postgres/postgres-payment-repository.js';
 import { DeterministicPaymentGateway } from '../infrastructure/payments/deterministic-payment-gateway.js';
 import {
+  CancelNotification,
+  CreateNotification,
+  GetNotification,
+  RetryNotification,
+  SendNotification,
+} from '../application/notification/notification-use-cases.js';
+import { PostgresNotificationRepository } from '../infrastructure/persistence/postgres/postgres-notification-repository.js';
+import { DeterministicNotificationSender } from '../infrastructure/notifications/deterministic-notification-sender.js';
+import {
+  handleNotificationRoute,
+  type NotificationHttpDependencies,
+} from './notification-routes.js';
+import {
   ApplicationError,
   AuthenticationError,
   ValidationError,
@@ -261,6 +274,7 @@ async function handle(
   authenticator: AuthenticationPort,
   dispatch: DispatchHttpDependencies | undefined,
   payments: PaymentHttpDependencies | undefined,
+  notifications: NotificationHttpDependencies | undefined,
 ): Promise<void> {
   response.setHeader('x-request-id', requestId);
   const method = request.method ?? 'GET';
@@ -278,6 +292,17 @@ async function handle(
       service: 'suftrip-v2',
     });
     return;
+  }
+
+  if (notifications && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'notifications') {
+    const result = await handleNotificationRoute(
+      request,
+      response,
+      authenticator,
+      notifications,
+      requestId,
+    );
+    if (result === 'handled') return;
   }
 
   const isDeliveryApi = parts[0] === 'api' && parts[1] === 'v1';
@@ -497,7 +522,7 @@ function errorResponse(
   if (error instanceof ApplicationError) {
     const statusCode = error.code === 'NOT_FOUND'
       ? 404
-      : error.code === 'CONFLICT'
+      : error.code === 'CONFLICT' || error.code === 'IDEMPOTENCY_CONFLICT'
         ? 409
         : error.code === 'INVALID_TRANSITION'
           ? 422
@@ -505,7 +530,7 @@ function errorResponse(
             ? 401
             : error.code === 'AUTHORIZATION_ERROR'
               ? 403
-          : 400;
+              : 400;
     sendError(response, statusCode, error.code, error.message, requestId);
     return;
   }
@@ -518,8 +543,9 @@ export function createHttpServer(
   authenticator?: AuthenticationPort,
   dispatchDependencies?: DispatchHttpDependencies,
   paymentDependencies?: PaymentHttpDependencies,
+  notificationDependencies?: NotificationHttpDependencies,
 ) {
-  const pool = service || dispatchDependencies || paymentDependencies ? undefined : createPostgresPool();
+  const pool = service || dispatchDependencies || paymentDependencies || notificationDependencies ? undefined : createPostgresPool();
   const deliveryRepository = pool ? new PostgresDeliveryJobRepository(pool) : undefined;
   const selectedService = service ?? new DeliveryService(deliveryRepository!);
   const selectedAuthenticator = authenticator ?? createAuthenticatorFromEnvironment();
@@ -545,10 +571,21 @@ export function createHttpServer(
       cancel: new CancelPayment(deliveryRepository!, paymentRepository),
     };
   })() : undefined);
+  const selectedNotifications = notificationDependencies ?? (pool ? (() => {
+    const notificationRepository = new PostgresNotificationRepository(pool);
+    const sender = new DeterministicNotificationSender();
+    return {
+      create: new CreateNotification(notificationRepository),
+      get: new GetNotification(notificationRepository),
+      send: new SendNotification(notificationRepository, sender),
+      retry: new RetryNotification(notificationRepository, sender),
+      cancel: new CancelNotification(notificationRepository),
+    };
+  })() : undefined);
 
   return createServer((request, response) => {
     const requestId = requestIdFor(request);
-    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments).catch((error: unknown) => {
+    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments, selectedNotifications).catch((error: unknown) => {
       errorResponse(response, error, requestId);
     });
   });
