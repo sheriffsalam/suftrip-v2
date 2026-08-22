@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
           POSTGRES_USER: suftrip
           POSTGRES_PASSWORD: development-only
@@ -36,3 +36,4 @@ jobs:
       - run: npm run build
       - run: npm audit --audit-level=high
       - run: git diff --check
+      - run: docker build -t suftrip-v2:ci .

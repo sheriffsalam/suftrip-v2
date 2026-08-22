@@ -1,34 +1,60 @@
 # Suftrip Testing
 
-## Implemented
+## Verification contract
 
-The project runs TypeScript compilation with `npm run build` and tests with `npm test`.
+The project uses a layered verification model:
 
-Current coverage includes:
+1. Domain tests prove business invariants without infrastructure.
+2. Application tests prove use cases through ports and in-memory adapters.
+3. HTTP tests prove authentication, authorization, validation, response contracts, rate limiting, and end-to-end application composition.
+4. PostgreSQL integration tests prove persistence, transactions, concurrency, leases, idempotency, and restart/durability behavior.
+5. Container verification proves the deployable runtime can be built from the repository.
 
-- DeliveryJob creation and validation.
-- Lifecycle transitions, cancellation, terminal states, versions, and domain events.
-- Application creation, retrieval, duplicate creation, status changes, not-found behavior, and stale versions.
-- HTTP creation, retrieval, malformed JSON, validation errors, request IDs, not-found responses, invalid transitions, conflicts, duplicate creates, and rate limiting.
-- PostgreSQL persistence, restart durability, timestamp preservation, duplicate IDs, and database-enforced stale-write conflicts when `DATABASE_URL` is configured.
-- Authentication failures, token expiry, role authorization, ownership authorization, admin access, security headers, and requester identity spoofing.
-- Dispatch lifecycle, deterministic provider selection, provider release/redispatch, authenticated HTTP dispatch flow, PostgreSQL dispatch persistence, and concurrent provider assignment.
-- Payment money/lifecycle validation, ownership, attempts, idempotency, authenticated API flow, PostgreSQL persistence, rollback, and concurrent terminal transitions.
-- Durable outbox claiming, lease expiry/reclamation, publication state, retry state, dead-lettering, publication failure handling, and cross-worker claim concurrency.
-- Outbox worker lifecycle serialization, configurable polling, start/stop behavior, invalid configuration rejection, and isolation of polling failures.
+## Current coverage
 
-## Test boundaries
-
-Domain tests are isolated from HTTP. Application tests use the in-memory repository. HTTP tests use an ephemeral Node HTTP server and the application ports. Rate-limit tests inject the rate-limiter port so enforcement is deterministic and independent of wall-clock timing.
+Coverage includes DeliveryJob lifecycle and concurrency, dispatch lifecycle and concurrent provider assignment, payment lifecycle/idempotency/rollback, notification lifecycle/idempotency, durable outbox claiming and retries, notification delivery worker lifecycle, PostgreSQL notification leases and cross-worker claim behavior, authentication/authorization, HTTP validation, security headers, request IDs, and API rate limiting.
 
 ## PostgreSQL integration tests
 
-Start PostgreSQL and apply migrations with `docker compose up -d postgres` followed by `npm run db:migrate`. Set `DATABASE_URL` from `.env.example`, then run `npx vitest run test/integration/postgres-delivery-job-repository.test.ts`.
+Start PostgreSQL and apply migrations:
 
-Payment integration coverage is in `test/integration/postgres-payment.test.ts` and `test/integration/postgres-payment-http.test.ts`; outbox coverage is in `test/integration/postgres-outbox.test.ts`. Run individual suites explicitly or use `npm test` with `DATABASE_URL` configured.
+```text
+docker compose up -d postgres
+npm run db:migrate
+```
 
-The integration suite is skipped when `DATABASE_URL` is absent so unit and API tests do not depend on a developer's database.
+Set `DATABASE_URL` from `.env.example`, then run:
 
-## Future coverage
+```text
+npm test
+```
 
-Identity provisioning, real gateway contract tests, webhooks, refunds, settlement tests, and distributed/shared rate limiting are not implemented until later phases.
+The integration suites are skipped when `DATABASE_URL` is absent. This keeps fast unit and HTTP verification independent from a developer database while still making the PostgreSQL boundary executable in CI or local verification.
+
+## Notification delivery verification
+
+`test/integration/postgres-notification-delivery-worker.test.ts` verifies:
+
+- durable queue claiming;
+- one-worker-only concurrent claiming;
+- lease expiry and reclamation;
+- previous-worker completion rejection after lease loss;
+- application worker processing through the sender port.
+
+## Product readiness gate
+
+A Product Owner demonstration build must pass:
+
+```text
+npm test
+npm run build
+npm audit --audit-level=high
+git diff --check
+docker build -t suftrip-v2 .
+```
+
+When PostgreSQL is available, the complete integration suite must also run with `DATABASE_URL` configured and must not be represented as green when integration tests were skipped.
+
+## Deliberately deferred coverage
+
+Identity provisioning, real payment-provider contract tests, external notification provider contracts, webhooks, refunds, settlement, and fleet-wide shared rate limiting remain deferred capabilities. They should not be introduced merely to increase test count; each requires an explicit architectural/product decision.

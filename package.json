@@ -9,7 +9,8 @@
     "test": "vitest run",
     "start": "node dist/src/http/server.js",
     "db:migrate": "npm run build && node dist/src/infrastructure/persistence/postgres/migrate.js",
-    "outbox:worker": "npm run build && node dist/src/infrastructure/outbox/run-outbox-worker.js"
+    "outbox:worker": "npm run build && node dist/src/infrastructure/outbox/run-outbox-worker.js",
+    "notification:worker": "npm run build && node dist/src/infrastructure/notifications/run-notification-delivery-worker.js"
   },
   "engines": {
     "node": ">=22"

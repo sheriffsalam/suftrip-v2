@@ -1,6 +1,3 @@
-# Runtime image for the Suftrip V2 TypeScript/Node foundation.
-# Dependencies and compilation remain explicit so the image cannot silently
-# substitute an undeclared build toolchain.
 FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
@@ -16,8 +13,10 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/infrastructure/persistence/postgres/migrations ./src/infrastructure/persistence/postgres/migrations
 
 USER node
 
