@@ -29,12 +29,16 @@ export class AssignProvider {
     if (!delivery) throw new NotFoundError(`DeliveryJob not found: ${dispatch.snapshot().deliveryJobId}`);
     requireDeliveryAccess(principal, delivery.snapshot().requesterId);
 
-    if (dispatch.snapshot().status === 'PROVIDER_ASSIGNED' &&
-        dispatch.snapshot().assignedProviderId === requestedProviderId) {
-      return dispatch.snapshot();
+    const current = dispatch.snapshot();
+    if (current.status === 'PROVIDER_ASSIGNED') {
+      if (!requestedProviderId || current.assignedProviderId === requestedProviderId) {
+        return current;
+      }
+      throw new DispatchAssignmentConflictError('DispatchJob already has a different provider assigned');
     }
-    if (dispatch.snapshot().status === 'PROVIDER_REJECTED') {
-      const previousVersion = dispatch.snapshot().version;
+
+    if (current.status === 'PROVIDER_REJECTED') {
+      const previousVersion = current.version;
       dispatch.startSearching();
       await this.dispatches.save(dispatch, previousVersion);
     }
@@ -49,9 +53,11 @@ export class AssignProvider {
       throw new ProviderUnavailableError();
     }
 
-    dispatch.assignProvider(provider.snapshot().id);
+    const providerId = provider.snapshot().id;
+    const expectedVersion = dispatch.snapshot().version;
+    dispatch.assignProvider(providerId);
     try {
-      await this.dispatches.assignProvider(dispatch, provider.snapshot().id, dispatch.snapshot().version - 1);
+      await this.dispatches.assignProvider(dispatch, providerId, expectedVersion);
     } catch (error: unknown) {
       if (error instanceof DispatchAssignmentConflictError) throw error;
       throw new DispatchAssignmentConflictError();
