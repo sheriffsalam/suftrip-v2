@@ -12,6 +12,12 @@ The outbox is processed at least once. Workers claim rows with PostgreSQL row lo
 
 The publisher is an application port. The current phase deliberately does not introduce Kafka, RabbitMQ, or another broker. A concrete publisher can be added later without coupling domain code to infrastructure.
 
+### Worker lifecycle
+
+`OutboxWorker` owns one durable processing batch. `OutboxWorkerRunner` owns the long-running process lifecycle around it. The runner polls on a configurable interval, never overlaps polls within the same process, catches polling failures so one transient infrastructure error does not terminate the worker loop, and supports explicit `start()` / `stop()` lifecycle control.
+
+Cross-process concurrency remains a PostgreSQL concern: separate runner processes may claim independent events concurrently, while row locking and leases prevent simultaneous claims of the same eligible event.
+
 ## Failure and retry
 
 Publication failures increment the durable attempt count and return the event to `PENDING` with a future `available_at`. The worker uses bounded exponential backoff, capped at five minutes. Once the configured maximum attempt count is reached, the event becomes `DEAD_LETTER` and is excluded from normal claims. The original payload and failure reason remain available for recovery tooling.
@@ -22,8 +28,8 @@ The system provides **at-least-once publication**, not exactly-once delivery. A 
 
 ## Concurrency
 
-Multiple workers may process independent events concurrently. PostgreSQL row locking prevents two workers from claiming the same eligible row at the same time. Lease expiry provides recovery from crashed workers.
+Multiple workers may process independent events concurrently. PostgreSQL row locking prevents two workers from claiming the same eligible row at the same time. Lease expiry provides recovery from crashed workers. Within one process, the worker runner serializes polling so a slow publisher cannot create overlapping batches.
 
 ## Observability
 
-The worker emits structured events for successful publication, retry scheduling, and dead-lettering. Event payloads are not logged.
+The worker emits structured events for successful publication, retry scheduling, and dead-lettering. Event payloads are not logged. Runner-level polling failures are logged without exposing event payloads.
