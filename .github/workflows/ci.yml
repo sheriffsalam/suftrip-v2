@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: suftrip
+          POSTGRES_PASSWORD: development-only
+          POSTGRES_DB: suftrip
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U suftrip -d suftrip"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://suftrip:development-only@localhost:5432/suftrip
+      AUTH_SECRET: ci-only-secret-that-is-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --audit-level=high
+      - run: git diff --check
