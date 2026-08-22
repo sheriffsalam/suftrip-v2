@@ -36,7 +36,6 @@ export type DeliveryEvent = {
   readonly deliveryJobId: string;
   readonly from: DeliveryStatus;
   readonly to: DeliveryStatus;
-  readonly version: number;
 };
 
 export type DeliveryJobSnapshot = Readonly<{
@@ -71,7 +70,9 @@ export class InvalidDeliveryTransitionError extends InvalidTransitionError {
   }
 }
 
-const TRANSITIONS: Readonly<Record<DeliveryStatus, readonly DeliveryStatus[]>> = {
+const TRANSITIONS: Readonly<
+  Record<DeliveryStatus, readonly DeliveryStatus[]>
+> = {
   DRAFT: ['REQUESTED'],
   REQUESTED: ['QUOTING', 'SEARCHING_FOR_PROVIDER', 'CANCELLED'],
   QUOTING: ['BOOKED', 'CANCELLED'],
@@ -87,16 +88,27 @@ const TRANSITIONS: Readonly<Record<DeliveryStatus, readonly DeliveryStatus[]>> =
   CANCELLED: [],
 };
 
-function validateLocation(location: DeliveryLocation, name: string): void {
+function validateLocation(
+  location: DeliveryLocation,
+  name: string,
+): void {
   if (!location.address.trim()) {
     throw new ValidationError(`${name}.address is required`);
   }
 
-  if (!Number.isFinite(location.latitude) || location.latitude < -90 || location.latitude > 90) {
+  if (
+    !Number.isFinite(location.latitude) ||
+    location.latitude < -90 ||
+    location.latitude > 90
+  ) {
     throw new ValidationError(`${name}.latitude must be between -90 and 90`);
   }
 
-  if (!Number.isFinite(location.longitude) || location.longitude < -180 || location.longitude > 180) {
+  if (
+    !Number.isFinite(location.longitude) ||
+    location.longitude < -180 ||
+    location.longitude > 180
+  ) {
     throw new ValidationError(`${name}.longitude must be between -180 and 180`);
   }
 }
@@ -117,43 +129,88 @@ export class DeliveryJob {
   ) {}
 
   static create(input: CreateDeliveryJobInput): DeliveryJob {
-    if (!input.id.trim()) throw new ValidationError('DeliveryJob id is required');
-    if (!input.requesterId.trim()) throw new ValidationError('DeliveryJob requesterId is required');
-    if (!DELIVERY_TYPES.includes(input.deliveryType)) {
-      throw new ValidationError(`Invalid deliveryType: ${String(input.deliveryType)}`);
+    if (!input.id.trim()) {
+      throw new ValidationError('DeliveryJob id is required');
     }
+
+    if (!input.requesterId.trim()) {
+      throw new ValidationError('DeliveryJob requesterId is required');
+    }
+
+    if (!DELIVERY_TYPES.includes(input.deliveryType)) {
+      throw new ValidationError(
+        `Invalid deliveryType: ${String(input.deliveryType)}`,
+      );
+    }
+
     validateLocation(input.pickup, 'pickup');
     validateLocation(input.dropoff, 'dropoff');
+
     const now = new Date().toISOString();
-    return new DeliveryJob(input.id, input.requesterId, input.pickup, input.dropoff, input.deliveryType, 'DRAFT', 0, now, now);
+
+    return new DeliveryJob(
+      input.id,
+      input.requesterId,
+      input.pickup,
+      input.dropoff,
+      input.deliveryType,
+      'DRAFT',
+      0,
+      now,
+      now,
+    );
   }
 
   static rehydrate(snapshot: DeliveryJobSnapshot): DeliveryJob {
-    if (!snapshot.id.trim()) throw new ValidationError('DeliveryJob id is required');
-    if (!snapshot.requesterId.trim()) throw new ValidationError('DeliveryJob requesterId is required');
-    if (!DELIVERY_TYPES.includes(snapshot.deliveryType)) {
-      throw new ValidationError(`Invalid deliveryType: ${String(snapshot.deliveryType)}`);
+    if (!snapshot.id.trim()) {
+      throw new ValidationError('DeliveryJob id is required');
     }
+
+    if (!snapshot.requesterId.trim()) {
+      throw new ValidationError('DeliveryJob requesterId is required');
+    }
+
+    if (!DELIVERY_TYPES.includes(snapshot.deliveryType)) {
+      throw new ValidationError(
+        `Invalid deliveryType: ${String(snapshot.deliveryType)}`,
+      );
+    }
+
     validateLocation(snapshot.pickup, 'pickup');
     validateLocation(snapshot.dropoff, 'dropoff');
-    return new DeliveryJob(snapshot.id, snapshot.requesterId, snapshot.pickup, snapshot.dropoff, snapshot.deliveryType, snapshot.status, snapshot.version, snapshot.createdAt, snapshot.updatedAt);
+
+    return new DeliveryJob(
+      snapshot.id,
+      snapshot.requesterId,
+      snapshot.pickup,
+      snapshot.dropoff,
+      snapshot.deliveryType,
+      snapshot.status,
+      snapshot.version,
+      snapshot.createdAt,
+      snapshot.updatedAt,
+    );
   }
 
   transitionTo(next: DeliveryStatus): void {
     if (!TRANSITIONS[this.status].includes(next)) {
-      throw new InvalidDeliveryTransitionError(this.status, next);
+      throw new InvalidDeliveryTransitionError(
+        this.status,
+        next,
+      );
     }
 
     const previous = this.status;
+
     this.status = next;
     this.version += 1;
     this.updatedAt = new Date().toISOString();
+
     this.events.push({
       type: 'DeliveryJobStatusChanged',
       deliveryJobId: this.id,
       from: previous,
       to: next,
-      version: this.version,
     });
   }
 
