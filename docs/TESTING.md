@@ -9,7 +9,7 @@ Current coverage includes:
 - DeliveryJob creation and validation.
 - Lifecycle transitions, cancellation, terminal states, versions, and domain events.
 - Application creation, retrieval, duplicate creation, status changes, not-found behavior, and stale versions.
-- HTTP creation, retrieval, malformed JSON, validation errors, request IDs, not-found responses, invalid transitions, conflicts, and duplicate creates.
+- HTTP creation, retrieval, malformed JSON, validation errors, request IDs, not-found responses, invalid transitions, conflicts, duplicate creates, and rate limiting.
 - PostgreSQL persistence, restart durability, timestamp preservation, duplicate IDs, and database-enforced stale-write conflicts when `DATABASE_URL` is configured.
 - Authentication failures, token expiry, role authorization, ownership authorization, admin access, security headers, and requester identity spoofing.
 - Dispatch lifecycle, deterministic provider selection, provider release/redispatch, authenticated HTTP dispatch flow, PostgreSQL dispatch persistence, and concurrent provider assignment.
@@ -17,7 +17,7 @@ Current coverage includes:
 
 ## Test boundaries
 
-Domain tests are isolated from HTTP. Application tests use the in-memory repository. HTTP tests use an ephemeral Node HTTP server and the application ports.
+Domain tests are isolated from HTTP. Application tests use the in-memory repository. HTTP tests use an ephemeral Node HTTP server and the application ports. Rate-limit tests inject the rate-limiter port so enforcement is deterministic and independent of wall-clock timing.
 
 ## PostgreSQL integration tests
 
@@ -29,4 +29,4 @@ The integration suite is skipped when `DATABASE_URL` is absent so unit and API t
 
 ## Future coverage
 
-Rate limiting, identity provisioning, real gateway contract tests, webhooks, refunds, and settlement tests are not implemented until later phases.
+Identity provisioning, real gateway contract tests, webhooks, refunds, settlement tests, and distributed/shared rate limiting are not implemented until later phases.
