@@ -203,9 +203,9 @@ export class PostgresNotificationRepository implements NotificationRepository {
 
       const result = await client.query(
         `UPDATE notifications
-            SET status = $1, version = version + 1, updated_at = $2
-          WHERE id = $3 AND version = $4`,
-        [snapshot.status, snapshot.updatedAt, snapshot.id, expectedVersion],
+            SET status = $1, version = $2, updated_at = $3
+          WHERE id = $4 AND version = $5`,
+        [snapshot.status, snapshot.version, snapshot.updatedAt, snapshot.id, expectedVersion],
       );
 
       if (result.rowCount !== 1) {
