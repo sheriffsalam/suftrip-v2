@@ -10,7 +10,17 @@ import {
   type NotificationSnapshot,
 } from '../../../domain/notification/notification.js';
 
-type ClaimedRow = NotificationSnapshot & {
+type ClaimedRow = {
+  id: string;
+  recipient_id: string;
+  channel: NotificationSnapshot['channel'];
+  template_key: string;
+  payload: NotificationSnapshot['payload'];
+  idempotency_key: string;
+  status: NotificationSnapshot['status'];
+  version: number;
+  created_at: Date;
+  updated_at: Date;
   attempts: number;
 };
 
@@ -33,7 +43,7 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
     if (!workerId.trim()) throw new Error('workerId is required');
 
     const leaseUntil = new Date(now.getTime() + leaseMs);
-    const result = await this.pool.query<ClaimedRow & { delivery_lease_until: Date }>(
+    const result = await this.pool.query<ClaimedRow>(
       `WITH candidates AS (
          SELECT n.id
            FROM notifications n
@@ -54,23 +64,22 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
          FROM candidates c
         WHERE n.id = c.id
        RETURNING ${COLUMNS},
-         (SELECT COUNT(*)::integer FROM notification_attempts a WHERE a.notification_id = n.id) AS attempts,
-         n.delivery_lease_until`,
+         (SELECT COUNT(*)::integer FROM notification_attempts a WHERE a.notification_id = n.id) AS attempts`,
       [now, maxAttempts, limit, workerId, leaseUntil],
     );
 
     return result.rows.map(row => ({
       notification: Notification.rehydrate({
         id: row.id,
-        recipientId: row.recipientId,
+        recipientId: row.recipient_id,
         channel: row.channel,
-        templateKey: row.templateKey,
+        templateKey: row.template_key,
         payload: row.payload,
-        idempotencyKey: row.idempotencyKey,
+        idempotencyKey: row.idempotency_key,
         status: row.status,
         version: row.version,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
+        createdAt: row.created_at.toISOString(),
+        updatedAt: row.updated_at.toISOString(),
       }),
       attemptId: `${row.id}-worker-${workerId}-${row.attempts + 1}`,
       attempts: row.attempts,
@@ -89,8 +98,7 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
       'SENT',
       providerReference,
     );
-
-    return this.complete(workerId, attemptId, snapshot, attempt.snapshot(), now);
+    return this.complete(workerId, snapshot, attempt.snapshot(), now);
   }
 
   async markFailed(
@@ -101,12 +109,11 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
   ): Promise<boolean> {
     const snapshot = notification.snapshot();
     const attempt = NotificationAttempt.create(attemptId, snapshot.id).withStatus('FAILED');
-    return this.complete(workerId, attemptId, snapshot, attempt.snapshot(), now);
+    return this.complete(workerId, snapshot, attempt.snapshot(), now);
   }
 
   private async complete(
     workerId: string,
-    attemptId: string,
     notification: NotificationSnapshot,
     attempt: ReturnType<NotificationAttempt['snapshot']>,
     now: Date,
@@ -114,7 +121,6 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-
       const result = await client.query(
         `UPDATE notifications
             SET status = $1,
@@ -124,8 +130,7 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
                 delivery_lease_until = NULL
           WHERE id = $4
             AND version = $5
-            AND delivery_worker_id = $6
-            AND delivery_lease_until > $7`,
+            AND delivery_worker_id = $6`,
         [
           notification.status,
           notification.version,
@@ -133,7 +138,6 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
           notification.id,
           notification.version - 1,
           workerId,
-          now,
         ],
       );
 
@@ -155,7 +159,6 @@ export class PostgresNotificationDeliveryQueue implements NotificationDeliveryQu
           attempt.updatedAt,
         ],
       );
-
       await client.query('COMMIT');
       return true;
     } catch (error) {
