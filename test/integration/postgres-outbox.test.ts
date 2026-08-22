@@ -22,6 +22,13 @@ integration('PostgreSQL durable outbox', () => {
   });
 
   beforeEach(async () => {
+    // delivery_jobs is referenced by dispatch_jobs and payments. Clean dependent
+    // rows first so this suite is isolated from the other PostgreSQL suites.
+    await pool.query('DELETE FROM payment_attempts');
+    await pool.query('DELETE FROM payment_creation_keys');
+    await pool.query('DELETE FROM payments');
+    await pool.query('DELETE FROM dispatch_jobs');
+    await pool.query('DELETE FROM providers');
     await pool.query('DELETE FROM outbox_events');
     await pool.query('DELETE FROM delivery_jobs');
   });
