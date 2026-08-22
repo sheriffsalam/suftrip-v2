@@ -11,6 +11,8 @@ import {
 } from '../domain/delivery/delivery-job.js';
 import { DeliveryService } from '../application/delivery/delivery-service.js';
 import type { AuthenticatedPrincipal, AuthenticationPort } from '../application/auth/authentication.js';
+import type { Logger } from '../application/observability/logger.js';
+import { JsonLogger } from '../infrastructure/observability/json-logger.js';
 import { PostgresDeliveryJobRepository } from '../infrastructure/persistence/postgres/postgres-delivery-job-repository.js';
 import { createPostgresPool } from '../infrastructure/persistence/postgres/postgres-client.js';
 import { createAuthenticatorFromEnvironment } from '../infrastructure/auth/signed-bearer-token-authenticator.js';
@@ -191,7 +193,7 @@ function errorResponse(response: ServerResponse, error: unknown, requestId: stri
   sendError(response, 500, 'INTERNAL_SERVER_ERROR', 'Internal server error', requestId);
 }
 
-export function createHttpServer(service?: DeliveryService, authenticator?: AuthenticationPort, dispatchDependencies?: DispatchHttpDependencies, paymentDependencies?: PaymentHttpDependencies, notificationDependencies?: NotificationHttpDependencies) {
+export function createHttpServer(service?: DeliveryService, authenticator?: AuthenticationPort, dispatchDependencies?: DispatchHttpDependencies, paymentDependencies?: PaymentHttpDependencies, notificationDependencies?: NotificationHttpDependencies, logger: Logger = new JsonLogger()) {
   const pool = service || dispatchDependencies || paymentDependencies || notificationDependencies ? undefined : createPostgresPool();
   const deliveryRepository = pool ? new PostgresDeliveryJobRepository(pool) : undefined;
   const selectedNotifications = notificationDependencies ?? (pool ? (() => {
@@ -208,7 +210,26 @@ export function createHttpServer(service?: DeliveryService, authenticator?: Auth
   const selectedAuthenticator = authenticator ?? createAuthenticatorFromEnvironment();
   const selectedDispatch = dispatchDependencies ?? (pool ? (() => { const dispatchRepository = new PostgresDispatchJobRepository(pool); const providerRepository = new PostgresProviderRepository(pool); return { createDispatch: new CreateDispatchJob(deliveryRepository!, dispatchRepository), assignProvider: new AssignProvider(deliveryRepository!, dispatchRepository, providerRepository), actions: new DispatchActions(deliveryRepository!, dispatchRepository), createProvider: new CreateProvider(providerRepository) }; })() : undefined);
   const selectedPayments = paymentDependencies ?? (pool ? (() => { const paymentRepository = new PostgresPaymentRepository(pool); const gateway = new DeterministicPaymentGateway(); return { create: new CreatePayment(deliveryRepository!, paymentRepository), get: new GetPayment(deliveryRepository!, paymentRepository), initiate: new InitiatePayment(deliveryRepository!, paymentRepository, gateway), confirm: new ConfirmPayment(deliveryRepository!, paymentRepository), fail: new FailPayment(deliveryRepository!, paymentRepository), cancel: new CancelPayment(deliveryRepository!, paymentRepository) }; })() : undefined);
-  return createServer((request, response) => { const requestId = requestIdFor(request); handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments, selectedNotifications).catch((error: unknown) => { errorResponse(response, error, requestId); }); });
+  return createServer((request, response) => {
+    const requestId = requestIdFor(request);
+    const startedAt = process.hrtime.bigint();
+    response.once('finish', () => {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+      logger.info('http.request.completed', {
+        requestId,
+        method: request.method ?? 'GET',
+        path: url.pathname,
+        statusCode: response.statusCode,
+        durationMs: Math.round(durationMs * 1000) / 1000,
+      });
+    });
+    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments, selectedNotifications)
+      .catch((error: unknown) => {
+        logger.error('http.request.failed', { requestId, method: request.method ?? 'GET' });
+        errorResponse(response, error, requestId);
+      });
+  });
 }
 
 if (process.argv[1]?.endsWith('server.js')) {
