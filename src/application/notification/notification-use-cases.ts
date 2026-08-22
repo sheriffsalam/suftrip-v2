@@ -98,7 +98,10 @@ async function deliver(
   requireIdempotencyKey(idempotencyKey);
   const notification = await getAuthorizedNotification(principal, notificationId, notifications);
   const existing = await notifications.findAttemptByIdempotencyKey(notificationId, operation, idempotencyKey);
-  if (existing) return { notification: notification.snapshot(), attempt: existing.snapshot() };
+  if (existing) {
+    const current = await getAuthorizedNotification(principal, notificationId, notifications);
+    return { notification: current.snapshot(), attempt: existing.snapshot() };
+  }
 
   const expectedVersion = notification.snapshot().version;
   const attemptId = `${notificationId}-${operation.toLowerCase()}-${expectedVersion + 1}`;
