@@ -37,7 +37,7 @@ async function createNotification(repository: PostgresNotificationRepository, id
     'IN_APP',
     'delivery.status.updated',
     { deliveryId: 'delivery-1', message: 'Your delivery is on the way' },
-    `create-key-${id}`,
+    'create-key-notification-1',
   );
 }
 
