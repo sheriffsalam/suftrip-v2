@@ -1,7 +1,6 @@
 import {
   DeliveryJob,
   type CreateDeliveryJobInput,
-  type DeliveryEvent,
   type DeliveryStatus,
 } from '../../domain/delivery/delivery-job.js';
 import type { DeliveryJobRepository } from './delivery-job-repository.js';
