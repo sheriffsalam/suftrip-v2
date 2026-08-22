@@ -37,6 +37,8 @@ type AttemptRow = {
 const NOTIFICATION_COLUMNS = `id, recipient_id, channel, template_key, payload, idempotency_key, status, version, created_at, updated_at`;
 const ATTEMPT_COLUMNS = `id, notification_id, status, provider_reference,
   created_at, updated_at`;
+const QUALIFIED_ATTEMPT_COLUMNS = `a.id, a.notification_id, a.status, a.provider_reference,
+  a.created_at, a.updated_at`;
 
 function toNotification(row: NotificationRow): Notification {
   return Notification.rehydrate({
@@ -92,7 +94,7 @@ export class PostgresNotificationRepository implements NotificationRepository {
     idempotencyKey: string,
   ): Promise<NotificationAttempt | null> {
     const result = await this.pool.query<AttemptRow>(
-      `SELECT ${ATTEMPT_COLUMNS}
+      `SELECT ${QUALIFIED_ATTEMPT_COLUMNS}
          FROM notification_attempts a
          JOIN notification_operation_keys k ON k.attempt_id = a.id
         WHERE k.notification_id = $1
