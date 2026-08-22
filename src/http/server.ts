@@ -13,6 +13,8 @@ import { DeliveryService } from '../application/delivery/delivery-service.js';
 import type { AuthenticatedPrincipal, AuthenticationPort } from '../application/auth/authentication.js';
 import type { Logger } from '../application/observability/logger.js';
 import { JsonLogger } from '../infrastructure/observability/json-logger.js';
+import { InMemoryRateLimiter } from '../infrastructure/rate-limit/in-memory-rate-limiter.js';
+import type { RateLimiter } from '../application/rate-limit/rate-limiter.js';
 import { PostgresDeliveryJobRepository } from '../infrastructure/persistence/postgres/postgres-delivery-job-repository.js';
 import { createPostgresPool } from '../infrastructure/persistence/postgres/postgres-client.js';
 import { createAuthenticatorFromEnvironment } from '../infrastructure/auth/signed-bearer-token-authenticator.js';
@@ -50,6 +52,18 @@ export type PaymentHttpDependencies = Readonly<{
 }>;
 
 const PORT = Number(process.env.PORT ?? 3000);
+const DEFAULT_RATE_LIMIT = 120;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+
+function configuredRateLimit(): number {
+  const value = Number(process.env.RATE_LIMIT_REQUESTS ?? DEFAULT_RATE_LIMIT);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_RATE_LIMIT;
+}
+
+function configuredRateLimitWindow(): number {
+  const value = Number(process.env.RATE_LIMIT_WINDOW_MS ?? DEFAULT_RATE_LIMIT_WINDOW_MS);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_RATE_LIMIT_WINDOW_MS;
+}
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
   response.setHeader('x-content-type-options', 'nosniff');
@@ -101,6 +115,9 @@ function requestIdFor(request: IncomingMessage): string {
   const supplied = request.headers['x-request-id'];
   return typeof supplied === 'string' && supplied.trim() ? supplied.trim().slice(0, 128) : randomUUID();
 }
+function rateLimitKey(request: IncomingMessage): string {
+  return request.socket.remoteAddress ?? 'unknown';
+}
 function authenticateRequest(request: IncomingMessage, authenticator: AuthenticationPort): AuthenticatedPrincipal {
   const authorization = request.headers.authorization;
   if (typeof authorization !== 'string') throw new AuthenticationError();
@@ -120,12 +137,23 @@ function paymentResponse(payment: Awaited<ReturnType<GetPayment['execute']>>): u
 }
 function paymentOperationResponse(result: PaymentOperationResult): unknown { return { payment: paymentResponse(result.payment), attempt: result.attempt }; }
 
-async function handle(request: IncomingMessage, response: ServerResponse, service: DeliveryService, requestId: string, authenticator: AuthenticationPort, dispatch: DispatchHttpDependencies | undefined, payments: PaymentHttpDependencies | undefined, notifications: NotificationHttpDependencies | undefined): Promise<void> {
+async function handle(request: IncomingMessage, response: ServerResponse, service: DeliveryService, requestId: string, authenticator: AuthenticationPort, dispatch: DispatchHttpDependencies | undefined, payments: PaymentHttpDependencies | undefined, notifications: NotificationHttpDependencies | undefined, rateLimiter: RateLimiter): Promise<void> {
   response.setHeader('x-request-id', requestId);
   const method = request.method ?? 'GET';
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const parts = url.pathname.split('/').filter(Boolean);
   if (method === 'GET' && url.pathname === '/health') { sendJson(response, 200, { status: 'ok', service: 'suftrip-v2' }); return; }
+  if (parts[0] === 'api' && parts[1] === 'v1') {
+    const decision = rateLimiter.check(rateLimitKey(request));
+    response.setHeader('x-ratelimit-limit', String(decision.limit));
+    response.setHeader('x-ratelimit-remaining', String(decision.remaining));
+    response.setHeader('x-ratelimit-reset', String(Math.ceil(decision.resetAt / 1000)));
+    if (!decision.allowed) {
+      response.setHeader('retry-after', String(Math.max(1, Math.ceil((decision.resetAt - Date.now()) / 1000))));
+      sendError(response, 429, 'RATE_LIMIT_EXCEEDED', 'Too many requests', requestId);
+      return;
+    }
+  }
   if (notifications && parts[0] === 'api' && parts[1] === 'v1' && parts[2] === 'notifications') {
     const result = await handleNotificationRoute(request, response, authenticator, notifications, requestId);
     if (result === 'handled') return;
@@ -193,7 +221,7 @@ function errorResponse(response: ServerResponse, error: unknown, requestId: stri
   sendError(response, 500, 'INTERNAL_SERVER_ERROR', 'Internal server error', requestId);
 }
 
-export function createHttpServer(service?: DeliveryService, authenticator?: AuthenticationPort, dispatchDependencies?: DispatchHttpDependencies, paymentDependencies?: PaymentHttpDependencies, notificationDependencies?: NotificationHttpDependencies, logger: Logger = new JsonLogger()) {
+export function createHttpServer(service?: DeliveryService, authenticator?: AuthenticationPort, dispatchDependencies?: DispatchHttpDependencies, paymentDependencies?: PaymentHttpDependencies, notificationDependencies?: NotificationHttpDependencies, logger: Logger = new JsonLogger(), rateLimiter: RateLimiter = new InMemoryRateLimiter(configuredRateLimit(), configuredRateLimitWindow())) {
   const pool = service || dispatchDependencies || paymentDependencies || notificationDependencies ? undefined : createPostgresPool();
   const deliveryRepository = pool ? new PostgresDeliveryJobRepository(pool) : undefined;
   const selectedNotifications = notificationDependencies ?? (pool ? (() => {
@@ -224,7 +252,7 @@ export function createHttpServer(service?: DeliveryService, authenticator?: Auth
         durationMs: Math.round(durationMs * 1000) / 1000,
       });
     });
-    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments, selectedNotifications)
+    handle(request, response, selectedService, requestId, selectedAuthenticator, selectedDispatch, selectedPayments, selectedNotifications, rateLimiter)
       .catch((error: unknown) => {
         logger.error('http.request.failed', { requestId, method: request.method ?? 'GET' });
         errorResponse(response, error, requestId);
