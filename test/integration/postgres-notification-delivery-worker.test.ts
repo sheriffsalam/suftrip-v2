@@ -52,16 +52,18 @@ integration('PostgreSQL notification delivery worker', () => {
     const claimed = await queue.claim('worker-1', 10, 30_000, 5, new Date('2026-08-22T11:00:00.000Z'));
 
     expect(claimed).toHaveLength(1);
-    expect(claimed[0].notification.snapshot().status).toBe('QUEUED');
+    const item = claimed[0];
+    if (!item) throw new Error('Expected one claimed notification');
+    expect(item.notification.snapshot().status).toBe('QUEUED');
 
-    claimed[0].notification.beginProcessing(claimed[0].attemptId);
-    claimed[0].notification.markSent(claimed[0].attemptId);
+    item.notification.beginProcessing(item.attemptId);
+    item.notification.markSent(item.attemptId);
     expect(
-      await queue.markSent('worker-1', claimed[0].attemptId, claimed[0].notification, 'provider-1'),
+      await queue.markSent('worker-1', item.attemptId, item.notification, 'provider-1'),
     ).toBe(true);
 
     expect((await repository.getById('worker-notification-1'))?.snapshot().status).toBe('SENT');
-    expect((await repository.getAttemptById(claimed[0].attemptId))?.snapshot().status).toBe('SENT');
+    expect((await repository.getAttemptById(item.attemptId))?.snapshot().status).toBe('SENT');
   });
 
   it('allows only one concurrent worker to claim a notification', async () => {
@@ -85,14 +87,18 @@ integration('PostgreSQL notification delivery worker', () => {
     const initial = new Date('2026-08-22T11:02:00.000Z');
     const claimed = await queue.claim('worker-a', 10, 1_000, 5, initial);
     expect(claimed).toHaveLength(1);
+    const original = claimed[0];
+    if (!original) throw new Error('Expected the initial worker to claim one notification');
 
     const reclaimed = await queue.claim('worker-b', 10, 30_000, 5, new Date(initial.getTime() + 2_000));
     expect(reclaimed).toHaveLength(1);
-    expect(reclaimed[0].attemptId).not.toBe(claimed[0].attemptId);
+    const replacement = reclaimed[0];
+    if (!replacement) throw new Error('Expected the replacement worker to reclaim one notification');
+    expect(replacement.attemptId).not.toBe(original.attemptId);
 
-    claimed[0].notification.beginProcessing(claimed[0].attemptId);
-    claimed[0].notification.markSent(claimed[0].attemptId);
-    expect(await queue.markSent('worker-a', claimed[0].attemptId, claimed[0].notification, 'late')).toBe(false);
+    original.notification.beginProcessing(original.attemptId);
+    original.notification.markSent(original.attemptId);
+    expect(await queue.markSent('worker-a', original.attemptId, original.notification, 'late')).toBe(false);
   });
 
   it('processes a claimed batch through the application worker', async () => {
