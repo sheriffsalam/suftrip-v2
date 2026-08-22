@@ -34,8 +34,7 @@ type AttemptRow = {
   updated_at: Date;
 };
 
-const NOTIFICATION_COLUMNS = `id, recipient_id, channel, template_key, payload,
-  idempotency_key, status, version, created_at, updated_at`;
+const NOTIFICATION_COLUMNS = `id, recipient_id, channel, template_key, payload, idempotency_key, status, version, created_at, updated_at`;
 const ATTEMPT_COLUMNS = `id, notification_id, status, provider_reference,
   created_at, updated_at`;
 
