@@ -1,5 +1,5 @@
 import type { AuthenticatedPrincipal } from '../auth/authentication.js';
-import { requireDeliveryAccess } from '../auth/authorization.js';
+import { requireDeliveryAccess, requireRole } from '../auth/authorization.js';
 import type { DeliveryJobRepository } from '../delivery/delivery-job-repository.js';
 import { DispatchAssignmentConflictError, NotFoundError, ProviderUnavailableError } from '../../shared/errors.js';
 import type { DispatchJob } from '../../domain/dispatch/dispatch-job.js';
@@ -28,6 +28,10 @@ export class AssignProvider {
     const delivery = await this.deliveries.getById(dispatch.snapshot().deliveryJobId);
     if (!delivery) throw new NotFoundError(`DeliveryJob not found: ${dispatch.snapshot().deliveryJobId}`);
     requireDeliveryAccess(principal, delivery.snapshot().requesterId);
+
+    if (requestedProviderId) {
+      requireRole(principal, 'ADMIN');
+    }
 
     const current = dispatch.snapshot();
     if (current.status === 'PROVIDER_ASSIGNED') {
