@@ -11,6 +11,7 @@ import { AuthorizationError, ProviderUnavailableError } from '../../src/shared/e
 
 const customer = { userId: 'customer-1', roles: ['CUSTOMER'] as const };
 const otherCustomer = { userId: 'customer-2', roles: ['CUSTOMER'] as const };
+const admin = { userId: 'admin-1', roles: ['ADMIN'] as const };
 const providerOne = { userId: 'provider-1', roles: ['PROVIDER'] as const };
 const providerTwo = { userId: 'provider-2', roles: ['PROVIDER'] as const };
 
@@ -57,16 +58,22 @@ describe('dispatch application', () => {
   it('accepts an assignment and rejects unavailable providers', async () => {
     const { createDispatch, assignProvider, actions, deliveryRepository, deliveryService, dispatchRepository, providers } = await setup();
     await createDispatch.execute(customer, 'dispatch-1', 'delivery-1');
-    await assignProvider.execute(customer, 'dispatch-1', 'provider-1');
+    await assignProvider.execute(admin, 'dispatch-1', 'provider-1');
     await actions.reject(providerOne, 'dispatch-1', 'provider-1');
-    await expect(assignProvider.execute(customer, 'dispatch-1', 'provider-2')).resolves.toMatchObject({ status: 'PROVIDER_ASSIGNED' });
+    await expect(assignProvider.execute(admin, 'dispatch-1', 'provider-2')).resolves.toMatchObject({ status: 'PROVIDER_ASSIGNED' });
     await expect(actions.accept(providerTwo, 'dispatch-1', 'provider-2')).resolves.toMatchObject({ status: 'PROVIDER_ACCEPTED' });
 
     const secondDispatch = new CreateDispatchJob(deliveryRepository, dispatchRepository);
     const secondAssignment = new AssignProvider(deliveryRepository, dispatchRepository, providers);
     await deliveryService.create(customer, { ...command, id: 'delivery-2' });
     await secondDispatch.execute(customer, 'dispatch-2', 'delivery-2');
-    await expect(secondAssignment.execute(customer, 'dispatch-2', 'provider-2')).rejects.toBeInstanceOf(ProviderUnavailableError);
+    await expect(secondAssignment.execute(admin, 'dispatch-2', 'provider-2')).rejects.toBeInstanceOf(ProviderUnavailableError);
+  });
+
+  it('rejects customer attempts to assign an explicit provider', async () => {
+    const { createDispatch, assignProvider } = await setup();
+    await createDispatch.execute(customer, 'dispatch-1', 'delivery-1');
+    await expect(assignProvider.execute(customer, 'dispatch-1', 'provider-1')).rejects.toBeInstanceOf(AuthorizationError);
   });
 
   it('enforces ownership authorization', async () => {
