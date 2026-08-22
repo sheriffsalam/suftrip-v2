@@ -6,6 +6,9 @@ import { DeliveryService } from '../../src/application/delivery/delivery-service
 import { InMemoryDeliveryJobRepository } from '../../src/application/delivery/in-memory-delivery-job-repository.js';
 import { SignedBearerTokenAuthenticator } from '../../src/infrastructure/auth/signed-bearer-token-authenticator.js';
 import { createHttpServer } from '../../src/http/server.js';
+import { CreateNotification, GetNotification, SendNotification, RetryNotification, CancelNotification } from '../../src/application/notification/notification-use-cases.js';
+import { InMemoryNotificationRepository } from '../../src/application/notification/in-memory-notification-repository.js';
+import { DeterministicNotificationSender } from '../../src/infrastructure/notifications/deterministic-notification-sender.js';
 
 const authenticator = new SignedBearerTokenAuthenticator(
   'phase-five-test-secret-that-is-at-least-32-characters',
@@ -97,10 +100,13 @@ describe('HTTP API', () => {
     });
   });
 
-  async function startServer(): Promise<void> {
+  async function startServer(notificationDependencies?: Parameters<typeof createHttpServer>[4]): Promise<void> {
     server = createHttpServer(
       new DeliveryService(new InMemoryDeliveryJobRepository()),
       authenticator,
+      undefined,
+      undefined,
+      notificationDependencies,
     );
     await new Promise<void>((resolve, reject) => {
       server.listen(0, () => resolve());
@@ -132,6 +138,58 @@ describe('HTTP API', () => {
 
     expect(retrieved.statusCode).toBe(200);
     expect(retrieved.body).toMatchObject({ id: 'job-1', version: 0 });
+  });
+
+  it('routes notification operations through the canonical API server', async () => {
+    const repository = new InMemoryNotificationRepository();
+    const sender = new DeterministicNotificationSender();
+    await startServer({
+      create: new CreateNotification(repository),
+      get: new GetNotification(repository),
+      send: new SendNotification(repository, sender),
+      retry: new RetryNotification(repository, sender),
+      cancel: new CancelNotification(repository),
+    });
+
+    const created = await sendRequest(
+      port,
+      'POST',
+      '/api/v1/notifications',
+      {
+        id: 'notification-http-1',
+        recipientId: 'requester-1',
+        channel: 'IN_APP',
+        templateKey: 'delivery.status.updated',
+        payload: { deliveryId: 'job-1', message: 'Your delivery is on the way' },
+      },
+      { 'idempotency-key': 'notification-create-1' },
+    );
+
+    expect(created.statusCode).toBe(201);
+    expect(created.body).toMatchObject({ id: 'notification-http-1', status: 'QUEUED' });
+
+    const sent = await sendRequest(
+      port,
+      'POST',
+      '/api/v1/notifications/notification-http-1/send',
+      undefined,
+      { 'idempotency-key': 'notification-send-1' },
+    );
+
+    expect(sent.statusCode).toBe(200);
+    expect(sent.body).toMatchObject({
+      notification: { id: 'notification-http-1', status: 'SENT' },
+      attempt: { status: 'SENT' },
+    });
+
+    const retrieved = await sendRequest(
+      port,
+      'GET',
+      '/api/v1/notifications/notification-http-1',
+    );
+
+    expect(retrieved.statusCode).toBe(200);
+    expect(retrieved.body).toMatchObject({ id: 'notification-http-1', status: 'SENT' });
   });
 
   it('requires valid bearer authentication for delivery endpoints', async () => {
