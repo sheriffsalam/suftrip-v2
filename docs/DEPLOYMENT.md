@@ -25,3 +25,5 @@ Phase 7 adds `payments`, `payment_creation_keys`, and `payment_attempts` through
 ## Production
 
 Provide `DATABASE_URL` and `AUTH_SECRET` through the deployment secret/configuration system. `AUTH_SECRET` must be at least 32 characters and must be rotated through the deployment configuration process. Do not commit `.env` files or credentials. The current Dockerfile runs the Node process as the non-root `node` user.
+
+The API rate limiter defaults to 120 requests per 60 seconds per client socket address. Override with `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_MS` when required. The limiter is process-local; deployments that run multiple API instances should introduce a shared rate-limit adapter before relying on the limit as a fleet-wide control. Do not derive client identity from untrusted forwarding headers without an explicit trusted-proxy configuration.
