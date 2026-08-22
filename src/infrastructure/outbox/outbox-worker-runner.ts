@@ -15,6 +15,7 @@ export type OutboxWorkerRunnerOptions = Readonly<{
  */
 export class OutboxWorkerRunner {
   private readonly pollIntervalMs: number;
+  private readonly logger: Logger | undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private pollInFlight = false;
@@ -29,8 +30,6 @@ export class OutboxWorkerRunner {
     }
     this.logger = options.logger;
   }
-
-  private readonly logger?: Logger;
 
   isRunning(): boolean {
     return this.running;
