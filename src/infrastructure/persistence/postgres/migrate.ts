@@ -10,6 +10,7 @@ const migrationPaths = [
   ['003-create-payments', 'src/infrastructure/persistence/postgres/migrations/003-create-payments.sql'],
   ['004-create-notifications', 'src/infrastructure/persistence/postgres/migrations/004-create-notifications.sql'],
   ['005-create-outbox-events', 'src/infrastructure/persistence/postgres/migrations/005-create-outbox-events.sql'],
+  ['006-notification-delivery-leases', 'src/infrastructure/persistence/postgres/migrations/006-notification-delivery-leases.sql'],
 ] as const;
 
 export async function migrate(pool: Pool): Promise<void> {
