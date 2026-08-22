@@ -228,7 +228,7 @@ describe('HTTP API', () => {
     const changed = await sendRequest(
       port,
       'PATCH',
-      '/api/v1/delivery-jobs/boundary-job',
+      '/api/v1/delivery-jobs/boundary-job/status',
       { expectedVersion: 0, nextStatus: 'REQUESTED' },
     );
     expect(changed.statusCode).toBe(200);
