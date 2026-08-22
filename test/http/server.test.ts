@@ -8,6 +8,7 @@ import { SignedBearerTokenAuthenticator } from '../../src/infrastructure/auth/si
 import { createHttpServer } from '../../src/http/server.js';
 import { CreateNotification, GetNotification, SendNotification, RetryNotification, CancelNotification } from '../../src/application/notification/notification-use-cases.js';
 import { InMemoryNotificationRepository } from '../../src/application/notification/in-memory-notification-repository.js';
+import { DeliveryNotificationEventSink } from '../../src/application/notification/delivery-notification-event-sink.js';
 import { DeterministicNotificationSender } from '../../src/infrastructure/notifications/deterministic-notification-sender.js';
 
 const authenticator = new SignedBearerTokenAuthenticator(
@@ -190,6 +191,67 @@ describe('HTTP API', () => {
 
     expect(retrieved.statusCode).toBe(200);
     expect(retrieved.body).toMatchObject({ id: 'notification-http-1', status: 'SENT' });
+  });
+
+  it('composes the delivery status event into the notification boundary', async () => {
+    const deliveryRepository = new InMemoryDeliveryJobRepository();
+    const notificationRepository = new InMemoryNotificationRepository();
+    const createNotification = new CreateNotification(notificationRepository);
+    const notificationDependencies = {
+      create: createNotification,
+      get: new GetNotification(notificationRepository),
+      send: new SendNotification(notificationRepository, new DeterministicNotificationSender()),
+      retry: new RetryNotification(notificationRepository, new DeterministicNotificationSender()),
+      cancel: new CancelNotification(notificationRepository),
+    };
+    const deliveryService = new DeliveryService(
+      deliveryRepository,
+      new DeliveryNotificationEventSink(deliveryRepository, createNotification),
+    );
+
+    server = createHttpServer(
+      deliveryService,
+      authenticator,
+      undefined,
+      undefined,
+      notificationDependencies,
+    );
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, () => resolve());
+      server.once('error', reject);
+    });
+    port = (server.address() as AddressInfo).port;
+
+    const created = await sendRequest(port, 'POST', '/api/v1/delivery-jobs', createBody('boundary-job'));
+    expect(created.statusCode).toBe(201);
+
+    const changed = await sendRequest(
+      port,
+      'PATCH',
+      '/api/v1/delivery-jobs/boundary-job',
+      { expectedVersion: 0, nextStatus: 'REQUESTED' },
+    );
+    expect(changed.statusCode).toBe(200);
+    expect(changed.body).toMatchObject({ id: 'boundary-job', status: 'REQUESTED', version: 1 });
+
+    const notification = await sendRequest(
+      port,
+      'GET',
+      '/api/v1/notifications/delivery-status-boundary-job-REQUESTED',
+    );
+    expect(notification.statusCode).toBe(200);
+    expect(notification.body).toMatchObject({
+      id: 'delivery-status-boundary-job-REQUESTED',
+      recipientId: 'requester-1',
+      templateKey: 'delivery.status.updated',
+      status: 'QUEUED',
+      payload: {
+        deliveryId: 'boundary-job',
+        from: 'DRAFT',
+        to: 'REQUESTED',
+        deliveryType: 'PARCEL',
+      },
+    });
   });
 
   it('requires valid bearer authentication for delivery endpoints', async () => {
