@@ -13,6 +13,15 @@ services:
       timeout: 3s
       retries: 15
 
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgres://suftrip:development-only@postgres:5432/suftrip
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "dist/src/infrastructure/persistence/postgres/migrate.js"]
+
   api:
     build: .
     environment:
@@ -22,9 +31,9 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
-    command: ["sh", "-c", "node dist/src/infrastructure/persistence/postgres/migrate.js && node dist/src/http/server.js"]
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "dist/src/http/server.js"]
 
   outbox-worker:
     build: .
@@ -32,8 +41,8 @@ services:
       DATABASE_URL: postgres://suftrip:development-only@postgres:5432/suftrip
       AUTH_SECRET: ${AUTH_SECRET:-development-only-secret-at-least-32-characters}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["node", "dist/src/infrastructure/outbox/run-outbox-worker.js"]
 
   notification-worker:
@@ -42,6 +51,6 @@ services:
       DATABASE_URL: postgres://suftrip:development-only@postgres:5432/suftrip
       NOTIFICATION_WORKER_ID: notification-worker-compose
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["node", "dist/src/infrastructure/notifications/run-notification-delivery-worker.js"]
