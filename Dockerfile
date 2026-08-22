@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/infrastructure/persistence/postgres/migrations ./src/infrastructure/persistence/postgres/migrations
 
 USER node
 
