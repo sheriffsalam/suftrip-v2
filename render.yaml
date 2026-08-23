@@ -22,14 +22,6 @@ services:
       - key: INTERNAL_API_PORT
         value: "3001"
 
-  - type: web
-    name: suftrip-web
-    runtime: static
-    plan: free
-    buildCommand: echo "Suftrip frontend is served by the API web service; this static service is optional."
-    staticPublishPath: ./web
-    autoDeploy: true
-
 databases:
   - name: suftrip-db
     plan: free
