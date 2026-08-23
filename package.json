@@ -8,6 +8,7 @@
     "build": "tsc",
     "test": "vitest run",
     "start": "node dist/src/http/server.js",
+    "start:public": "node dist/src/http/public-server.js",
     "start:outbox": "node dist/src/infrastructure/outbox/run-outbox-worker.js",
     "start:notifications": "node dist/src/infrastructure/notifications/run-notification-delivery-worker.js",
     "db:migrate": "npm run build && node dist/src/infrastructure/persistence/postgres/migrate.js",
