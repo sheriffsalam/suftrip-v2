@@ -15,6 +15,14 @@ type TokenPayload = Readonly<{
   exp: number;
 }>;
 
+/**
+ * Signed bearer authentication used by normal deployments.
+ *
+ * A deliberately explicit demo-only credential is also supported when
+ * DEMO_AUTH=true. This keeps the zero-cost public prototype usable without
+ * putting a signing secret in the browser. It must never be enabled for a
+ * production deployment.
+ */
 export class SignedBearerTokenAuthenticator implements AuthenticationPort {
   constructor(private readonly secret: string) {
     if (secret.length < 32) {
@@ -23,6 +31,9 @@ export class SignedBearerTokenAuthenticator implements AuthenticationPort {
   }
 
   authenticate(credential: string): AuthenticatedPrincipal {
+    const demoPrincipal = authenticateDemoCredential(credential);
+    if (demoPrincipal) return demoPrincipal;
+
     const parts = credential.split('.');
     if (parts.length !== 3) throw new AuthenticationError('Invalid bearer token');
 
@@ -88,6 +99,22 @@ export function createAuthenticatorFromEnvironment(): SignedBearerTokenAuthentic
   const secret = process.env.AUTH_SECRET;
   if (!secret) throw new Error('AUTH_SECRET is required for authentication');
   return new SignedBearerTokenAuthenticator(secret);
+}
+
+function authenticateDemoCredential(credential: string): AuthenticatedPrincipal | null {
+  if (process.env.DEMO_AUTH !== 'true') return null;
+
+  const match = /^demo:(customer|provider|admin)$/i.exec(credential.trim());
+  if (!match?.[1]) return null;
+
+  const role = match[1].toUpperCase() as UserRole;
+  const userId = role === 'CUSTOMER'
+    ? 'demo-customer'
+    : role === 'PROVIDER'
+      ? 'demo-provider'
+      : 'demo-admin';
+
+  return { userId, roles: [role] };
 }
 
 function encodeJson(value: unknown): string {
