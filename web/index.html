@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>Suftrip — Delivery</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar"><div class="brand">Suf<span>trip</span></div><div id="identity" class="identity">Demo delivery platform</div></header>
+  <main class="shell">
+    <section id="login" class="card login-card">
+      <div class="eyebrow">LOGISTICS • DELIVERY</div>
+      <h1>Move anything.<br><span>Simply.</span></h1>
+      <p>Create and track a delivery in a few clicks. This free prototype uses the Suftrip API and PostgreSQL backend.</p>
+      <button id="customerLogin" class="primary">Enter customer demo</button>
+      <p class="muted">No payment credentials are collected in the prototype.</p>
+    </section>
+
+    <section id="app" hidden>
+      <div class="hero"><div><div class="eyebrow">CUSTOMER</div><h1>Book a delivery</h1><p>Tell us where it starts, where it goes and what you are sending.</p></div><button id="logout" class="ghost">Sign out</button></div>
+      <div class="grid">
+        <form id="deliveryForm" class="card form-card">
+          <h2>Delivery details</h2>
+          <label>Pickup address<input id="pickupAddress" required placeholder="Ikeja, Lagos"></label>
+          <div class="two"><label>Latitude<input id="pickupLat" type="number" step="any" value="6.6018" required></label><label>Longitude<input id="pickupLng" type="number" step="any" value="3.3515" required></label></div>
+          <label>Drop-off address<input id="dropoffAddress" required placeholder="Yaba, Lagos"></label>
+          <div class="two"><label>Latitude<input id="dropoffLat" type="number" step="any" value="6.5158" required></label><label>Longitude<input id="dropoffLng" type="number" step="any" value="3.3892" required></label></div>
+          <label>Delivery type<select id="deliveryType"><option>PARCEL</option><option>FOOD</option><option>DOCUMENT</option><option>OTHER</option></select></label>
+          <button class="primary" type="submit">Request delivery</button>
+          <div id="formMessage" class="message"></div>
+        </form>
+        <section class="card status-card">
+          <div class="section-head"><h2>Current delivery</h2><button id="refresh" class="ghost" hidden>Refresh</button></div>
+          <div id="empty" class="empty">No active delivery yet.</div>
+          <div id="delivery" hidden></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
