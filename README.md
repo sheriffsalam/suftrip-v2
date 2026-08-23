@@ -14,7 +14,10 @@ Suftrip V2 is a logistics-first modular monolith built to demonstrate a producti
 - Durable notification delivery with PostgreSQL claiming, leases, retries, and at-least-once semantics
 - Structured logging, health endpoint, security headers, and API rate limiting
 - Unit, HTTP, and PostgreSQL integration test boundaries
-- CI verification and Docker runtime packaging
+- Responsive customer browser application in `web/`
+- One-service public launcher that serves the frontend and API together
+- Render Blueprint for a zero-cost prototype deployment
+- CI verification covering build, PostgreSQL integration tests, audit, and whitespace checks
 
 ## Architecture
 
@@ -28,11 +31,21 @@ See:
 - `docs/DOMAIN-MODEL.md` — domain model
 - `docs/API.md` — HTTP contract
 - `docs/SECURITY.md` — authentication and authorization
-- `docs/DEPLOYMENT.md` — local and production deployment
+- `docs/DEPLOYMENT.md` — local and public prototype deployment
 - `docs/TESTING.md` — verification strategy
 - `docs/OBSERVABILITY.md` — logging and operational signals
 - `docs/OUTBOX.md` — durable event delivery
 - `docs/DECISIONS/` — architectural decisions
+
+## Free public prototype
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/sheriffsalam/suftrip-v2)
+
+The repository contains `render.yaml`. The free Render deployment provisions the Node API/frontend service and a free PostgreSQL database. The browser app is served from the same HTTPS origin, so there is no browser CORS or frontend secret configuration.
+
+The prototype enables `DEMO_AUTH=true` and accepts the browser-only demo credential `demo:customer`. This is intentionally gated on the server and is **not a production authentication mechanism**.
+
+The free Render Postgres tier is 1 GB and currently expires after 30 days, so this deployment is for testing, demonstrations, and early validation rather than permanent production storage.
 
 ## Run locally
 
@@ -42,7 +55,7 @@ Requirements: Node.js 22+, Docker, and Docker Compose.
 docker compose up --build
 ```
 
-The API is available on port `3000`. PostgreSQL remains internal to the Compose network except for the development port mapping. The Compose stack starts PostgreSQL, applies migrations before the API starts, and runs the outbox and notification delivery workers as separate runtime processes while keeping the same modular-monolith codebase and PostgreSQL persistence boundary.
+The API is available on port `3000`. PostgreSQL remains internal to the Compose network except for the development port mapping.
 
 For focused development without the full stack:
 
@@ -55,7 +68,18 @@ npm run build
 npm start
 ```
 
-Integration tests run when `DATABASE_URL` is configured; otherwise they are intentionally skipped so unit/API verification remains portable.
+To run the complete browser experience locally after the database is available:
+
+```text
+$env:DATABASE_URL="postgres://suftrip:development-only@localhost:5432/suftrip"
+$env:AUTH_SECRET="local-development-secret-that-is-long-enough"
+$env:DEMO_AUTH="true"
+npm run build
+npm run db:migrate:runtime
+npm run start:public
+```
+
+Then open `http://localhost:3000` and choose **Enter customer demo**.
 
 ## Verification gate
 
@@ -69,8 +93,8 @@ git diff --check
 docker build -t suftrip-v2 .
 ```
 
-The project treats tests, strict TypeScript compilation, dependency audit, whitespace validation, and container build as separate verification signals.
+CI repeats the build, PostgreSQL-backed integration tests, dependency audit, and whitespace validation on GitHub Actions.
 
 ## Product boundary
 
-This repository is intentionally not a complete marketplace, routing engine, external payment processor, or identity-management system. Those capabilities remain outside the current bounded design unless explicitly added through an architectural decision. The goal is a usable and demonstrable logistics core with strong engineering and operational foundations.
+This repository is intentionally not a complete marketplace, routing engine, external payment processor, or identity-management system. Those capabilities remain outside the current bounded design unless explicitly added through an architectural decision. The current browser experience is a usable delivery prototype backed by the logistics core.
