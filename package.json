@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "Suftrip V2 modular monolith",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "start": "node dist/src/http/server.js",
     "start:public": "node dist/src/http/public-server.js",
@@ -14,16 +14,12 @@
     "db:migrate": "npm run build && node dist/src/infrastructure/persistence/postgres/migrate.js",
     "db:migrate:runtime": "node dist/src/infrastructure/persistence/postgres/migrate.js"
   },
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": {"node": ">=22"},
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
-  "dependencies": {
-    "pg": "^8.23.0"
-  }
+  "dependencies": {"pg": "^8.23.0"}
 }
